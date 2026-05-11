@@ -1,0 +1,10 @@
+src
+test
+node_modules
+tsconfig*.json
+biome.json
+vitest.config.mts
+.gitignore
+coverage
+*.log
+.DS_Store

@@ -1,0 +1,53 @@
+{
+    "name": "@monetizationos/proxy",
+    "version": "1.0.0",
+    "description": "Platform-agnostic MonetizationOS proxy core",
+    "license": "MIT",
+    "type": "module",
+    "main": "./dist/index.js",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": ["dist", "README.md", "LICENSE"],
+    "sideEffects": false,
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/MonetizationOS/mos-proxy.git"
+    },
+    "bugs": {
+        "url": "https://github.com/MonetizationOS/mos-proxy/issues"
+    },
+    "homepage": "https://github.com/MonetizationOS/mos-proxy#readme",
+    "keywords": ["monetization", "proxy", "cloudflare-workers", "fastly", "akamai", "html-rewriter"],
+    "engines": {
+        "node": ">=22"
+    },
+    "packageManager": "pnpm@10.32.1",
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.build.json",
+        "test": "vitest",
+        "test:run": "vitest run",
+        "typecheck": "tsc --noEmit",
+        "lint": "biome check --diagnostic-level=error --no-errors-on-unmatched",
+        "format": "biome check --write --no-errors-on-unmatched",
+        "prepublishOnly": "pnpm run typecheck && pnpm run test:run && pnpm run build"
+    },
+    "dependencies": {
+        "cookie": "^1.1.1"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "2.4.15",
+        "@types/node": "^24.12.3",
+        "html-rewriter-wasm": "^0.4.1",
+        "typescript": "^6.0.3",
+        "vitest": "~4.1.5"
+    }
+}
