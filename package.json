@@ -4,14 +4,13 @@
     "description": "Platform-agnostic MonetizationOS proxy core",
     "license": "MIT",
     "type": "module",
-    "main": "./dist/index.js",
-    "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
-        }
+        },
+        "./package.json": "./package.json"
     },
     "files": ["dist", "README.md", "LICENSE"],
     "sideEffects": false,
@@ -38,6 +37,9 @@
         "typecheck": "tsc --noEmit",
         "lint": "biome check --diagnostic-level=error --no-errors-on-unmatched",
         "format": "biome check --write --no-errors-on-unmatched",
+        "changeset": "changeset",
+        "version": "changeset version && node scripts/sync-version.mjs && pnpm run format",
+        "release": "changeset publish",
         "prepublishOnly": "pnpm run typecheck && pnpm run test:run && pnpm run build"
     },
     "dependencies": {
@@ -45,6 +47,8 @@
     },
     "devDependencies": {
         "@biomejs/biome": "2.4.15",
+        "@changesets/changelog-github": "^0.7.0",
+        "@changesets/cli": "^2.31.0",
         "@types/node": "^24.12.3",
         "html-rewriter-wasm": "^0.4.1",
         "typescript": "^6.0.3",
