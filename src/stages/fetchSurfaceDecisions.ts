@@ -36,6 +36,7 @@ export default async function fetchSurfaceDecisions(
 ): Promise<FetchSurfaceDecisionsResult> {
     const { config } = ctx
     const body = JSON.stringify({
+        ...clientMetadata,
         surfaceSlug: config.surfaceSlug,
         identity: buildIdentity({ anonymousIdentifier, userJwt }),
         resource: {
@@ -49,8 +50,6 @@ export default async function fetchSurfaceDecisions(
                 status: originStatus,
             },
         },
-        // Legacy field name kept to avoid breaking the API schema; opaque to the proxy core.
-        cloudflare: clientMetadata,
     })
 
     const request = new Request(new URL('/api/v1/surface-decisions', config.mosHost), {

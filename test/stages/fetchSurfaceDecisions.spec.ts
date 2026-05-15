@@ -49,7 +49,7 @@ describe('fetchSurfaceDecisions', () => {
                 anonymousIdentifier: 'anon-abc',
                 pageMetadata: { description: 'd' },
                 userAgent: 'TestAgent/1.0',
-                clientMetadata: { cf: { country: 'US' } },
+                clientMetadata: { cloudflare: { cf: { country: 'US' } } },
             }),
             fetcher,
         )
@@ -71,6 +71,22 @@ describe('fetchSurfaceDecisions', () => {
             http: { url: 'https://proxy.example.com/article', userAgent: 'TestAgent/1.0', proxyOrigin: { status: 200 } },
             cloudflare: { cf: { country: 'US' } },
         })
+    })
+
+    it('spreads Fastly client metadata at the top level to match the Fastly proxy shape', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(
+            ctx,
+            args({
+                clientMetadata: { fastly: { client: { geo: { country_code: 'US' } }, sigsci: {} } },
+            }),
+            fetcher,
+        )
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.fastly).toEqual({ client: { geo: { country_code: 'US' } }, sigsci: {} })
+        expect(body.cloudflare).toBeUndefined()
     })
 
     it('requests an anonymous identifier when no cookies are present', async () => {
