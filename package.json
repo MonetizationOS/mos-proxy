@@ -34,6 +34,7 @@
         "build": "tsc -p tsconfig.build.json",
         "test": "vitest",
         "test:run": "vitest run",
+        "bench": "tsx bench/linkRewriting.bench.ts",
         "typecheck": "tsc --noEmit",
         "lint": "biome check --diagnostic-level=error --no-errors-on-unmatched",
         "format": "biome check --write --no-errors-on-unmatched",
@@ -51,6 +52,7 @@
         "@changesets/cli": "^2.31.0",
         "@types/node": "^24.12.3",
         "html-rewriter-wasm": "^0.4.1",
+        "tsx": "^4.21.0",
         "typescript": "^6.0.3",
         "vitest": "~4.1.5"
     }

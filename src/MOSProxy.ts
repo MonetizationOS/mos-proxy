@@ -12,7 +12,7 @@ import shouldIgnorePath from './stages/shouldIgnorePath'
 import handleSurfaceBehavior from './stages/surfaceBehavior'
 import handleSurfaceComponents from './stages/surfaceComponents'
 import getSurfaceDecisions from './stages/surfaceDecisions'
-import type { MOSConfigInput } from './types'
+import type { MOSConfigInput, PageMetadata } from './types'
 
 export type MOSProxyHtmlPipelineStage =
     | 'origin-response'
@@ -47,6 +47,12 @@ export interface MOSProxyOptions {
     onHtmlPipelineError?: MOSProxyHtmlPipelineErrorHandler
     customEndpointsEnabled: boolean
     linkRewritingEnabled: boolean
+    /**
+     * Opt in to the streaming HTML rewriter for HTML payloads (attrs + script/style/template,
+     * not prose) and fold page-metadata extraction into the same parse pass. Requires
+     * `htmlRewriter`. When `false` (default), HTML uses the same streaming regex as JSON/markdown.
+     */
+    htmlAwareLinkRewritingEnabled?: boolean
     surfaceDecisionsEnabled: boolean
     htmlTransformationEnabled: boolean
 }
@@ -81,24 +87,41 @@ export class MOSProxy {
         // Stage 1b: origin fetch
         const originResponse = await performOriginRequest(ctx, request, originFetcher)
 
-        // Auto-skip HTML pipeline for non-HTML content, or when HTML transformation is disabled entirely
-        const isHtml = originResponse.headers.get('Content-Type')?.startsWith('text/html') ?? false
-        if (!isHtml || !this.opts.htmlTransformationEnabled) {
-            return originResponse
+        let stage: MOSProxyHtmlPipelineStage = 'origin-response'
+
+        // Stage 2: rewrite origin links for textual content types. Gated by
+        // `htmlTransformationEnabled` so `.withoutHtmlTransformation()` keeps API-only proxies
+        // fully passthrough — link rewriting is part of the HTML transformation pipeline even
+        // though it also covers JSON/XML/plain-text bodies.
+        let rewrittenResponse: Response = originResponse
+        let extractedPageMetadata: PageMetadata | null = null
+        if (this.opts.htmlTransformationEnabled && this.opts.linkRewritingEnabled) {
+            try {
+                const result = rewriteOriginResponse(ctx, request, originResponse, htmlRewriter, {
+                    htmlAware: this.opts.htmlAwareLinkRewritingEnabled,
+                })
+                rewrittenResponse = result.response
+                if (this.opts.htmlAwareLinkRewritingEnabled) {
+                    extractedPageMetadata = result.pageMetadata
+                }
+            } catch (error) {
+                logger.log({
+                    level: 'error',
+                    code: 'link-rewriting-body-failed',
+                    message: 'Link rewriting failed; returning the unmodified origin response.',
+                    error,
+                })
+            }
         }
 
-        let stage: MOSProxyHtmlPipelineStage = 'origin-response'
-        let failOpenResponse = cloneResponseForFallback(originResponse, logger, stage)
+        const isHtml = originResponse.headers.get('Content-Type')?.startsWith('text/html') ?? false
+        if (!isHtml || !this.opts.htmlTransformationEnabled) {
+            return rewrittenResponse
+        }
+
+        let failOpenResponse = cloneResponseForFallback(rewrittenResponse, logger, stage)
 
         try {
-            // Stage 2: rewrite origin links (optional)
-            let rewrittenResponse: Response = originResponse
-            if (this.opts.linkRewritingEnabled) {
-                stage = 'link-rewriting'
-                rewrittenResponse = await rewriteOriginResponse(ctx, request, originResponse)
-                failOpenResponse = cloneResponseForFallback(rewrittenResponse, logger, stage)
-            }
-
             // Stage 3: surface decisions (optional)
             if (!this.opts.surfaceDecisionsEnabled) {
                 return rewrittenResponse
@@ -119,6 +142,7 @@ export class MOSProxy {
                 apiFetcher,
                 htmlRewriter,
                 clientMetadataProvider,
+                extractedPageMetadata,
             )
             if (!surfaceDecisions) {
                 return modifiedResponse

@@ -3,6 +3,7 @@ import type { ElementHandlers, HtmlRewriterAdapter, HtmlRewriterCapabilities, Ht
 import { MOSProxyBuilder } from '../src/index'
 import type { MOSProxyLogEvent } from '../src/logger'
 import type { MOSConfigInput, SurfaceDecisionResponse } from '../src/types'
+import { LolHtmlRewriter } from './fakes/LolHtmlRewriter'
 import { MockFetcher } from './fakes/MockFetcher'
 import { PassthroughHtmlRewriter } from './fakes/PassthroughHtmlRewriter'
 
@@ -48,12 +49,14 @@ const createMemoryLogger = () => {
 
 class TransformSequenceHtmlRewriter implements HtmlRewriterAdapter {
     readonly capabilities: HtmlRewriterCapabilities = { onEndTag: true, nthChild: true }
+    private readonly delegate = new LolHtmlRewriter()
     private transformCount = 0
 
     constructor(private readonly throwOnTransformCount: number) {}
 
     create(): HtmlRewriterSession {
-        return new TransformSequenceSession(() => {
+        const innerSession = this.delegate.create()
+        return new TransformSequenceSession(innerSession, () => {
             this.transformCount++
             if (this.transformCount === this.throwOnTransformCount) {
                 throw new Error('html transform failed')
@@ -63,15 +66,19 @@ class TransformSequenceHtmlRewriter implements HtmlRewriterAdapter {
 }
 
 class TransformSequenceSession implements HtmlRewriterSession {
-    constructor(private readonly beforeTransform: () => void) {}
+    constructor(
+        private readonly inner: HtmlRewriterSession,
+        private readonly beforeTransform: () => void,
+    ) {}
 
-    on(_selector: string, _handlers: ElementHandlers): this {
+    on(selector: string, handlers: ElementHandlers): this {
+        this.inner.on(selector, handlers)
         return this
     }
 
     transform(response: Response): Response {
         this.beforeTransform()
-        return response
+        return this.inner.transform(response)
     }
 }
 
@@ -147,7 +154,7 @@ describe('MOSProxy pipeline', () => {
             .withConfig(baseConfig)
             .withOriginFetcher(originFetcher)
             .withApiFetcher(apiFetcher)
-            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withHtmlRewriter(new LolHtmlRewriter())
             .build()
 
         const response = await proxy.handle(new Request('https://proxy.example.com/article'))
@@ -281,7 +288,7 @@ describe('MOSProxy pipeline', () => {
             .withConfig(baseConfig)
             .withOriginFetcher(originFetcher)
             .withApiFetcher(apiFetcher)
-            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withHtmlRewriter(new LolHtmlRewriter())
             .withLogger(logger)
             .build()
 
@@ -418,7 +425,7 @@ describe('MOSProxy pipeline', () => {
 })
 
 describe('MOSProxy API-only mode (withoutHtmlTransformation)', () => {
-    it('bypasses the HTML pipeline and does not require an HTML rewriter', async () => {
+    it('bypasses the entire HTML pipeline including link rewriting (no HTML rewriter required)', async () => {
         const originFetcher = MockFetcher(() => htmlResponse('<a href="https://origin.example.com/x">x</a>', { status: 200 }))
         const apiFetcher = MockFetcher(() => new Response(null, { status: 500 }))
 
@@ -430,6 +437,7 @@ describe('MOSProxy API-only mode (withoutHtmlTransformation)', () => {
             .build()
 
         const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+        // Link rewriting is part of the HTML transformation pipeline and is disabled too.
         expect(await response.text()).toBe('<a href="https://origin.example.com/x">x</a>')
         expect(apiFetcher.calls.length).toBe(0)
     })
@@ -463,5 +471,17 @@ describe('MOSProxyBuilder validation', () => {
                 .withApiFetcher(MockFetcher(() => new Response(null)))
                 .build(),
         ).toThrow(/withHtmlRewriter/)
+    })
+
+    it('requires an HTML rewriter when withHtmlAwareLinkRewriting is enabled', () => {
+        expect(() =>
+            new MOSProxyBuilder()
+                .withConfig(baseConfig)
+                .withOriginFetcher(MockFetcher(() => new Response(null)))
+                .withApiFetcher(MockFetcher(() => new Response(null)))
+                .withoutSurfaceDecisions()
+                .withHtmlAwareLinkRewriting()
+                .build(),
+        ).toThrow(/withHtmlAwareLinkRewriting.*withHtmlRewriter/)
     })
 })

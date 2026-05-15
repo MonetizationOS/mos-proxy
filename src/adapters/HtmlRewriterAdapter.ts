@@ -45,6 +45,7 @@ export interface ContentOptions {
 export interface RewriterElement {
     readonly removed: boolean
     readonly tagName: string
+    readonly attributes: Iterable<[string, string]>
     getAttribute(name: string): string | null
     hasAttribute(name: string): boolean
     setAttribute(name: string, value: string): void
@@ -63,4 +64,5 @@ export interface RewriterText {
     readonly lastInTextNode: boolean
     readonly removed: boolean
     remove(): void
+    replace(content: string, options?: ContentOptions): void
 }

@@ -49,7 +49,7 @@ export default {
 5. Surface behavior (HTTP-level mutations)
 6. Surface components (DOM-level transforms)
 
-Stages 3–6 run on HTML responses only and auto-skip for everything else. Call `.withoutHtmlTransformation()` to disable them entirely.
+Stage 3 (link rewriting) covers response headers plus text/HTML/JSON/XML bodies; `text/css`, `text/javascript`, and binary or unknown content types pass through with headers rewritten but body untouched. Stages 4–6 are HTML-only and auto-skip for everything else. Call `.withoutHtmlTransformation()` to disable stages 3–6 entirely; `.withoutLinkRewriting()` disables only stage 3.
 
 ## Adapters
 

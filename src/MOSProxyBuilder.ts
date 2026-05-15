@@ -46,6 +46,7 @@ export class MOSProxyBuilder {
     private _onHtmlPipelineError: MOSProxyHtmlPipelineErrorHandler | null = null
     private _customEndpoints = true
     private _linkRewriting = true
+    private _htmlAwareLinkRewriting = false
     private _surfaceDecisions = true
     private _htmlTransformation = true
 
@@ -101,6 +102,17 @@ export class MOSProxyBuilder {
         return this
     }
 
+    /**
+     * Route HTML through the streaming HTML rewriter (attrs + script/style/template, not prose)
+     * and fold page-metadata extraction into the same parse. Requires `withHtmlRewriter(...)`.
+     * Default is streaming regex, which is faster but matches every byte sequence regardless of
+     * HTML context.
+     */
+    withHtmlAwareLinkRewriting(): this {
+        this._htmlAwareLinkRewriting = true
+        return this
+    }
+
     withoutSurfaceDecisions(): this {
         this._surfaceDecisions = false
         return this
@@ -128,6 +140,9 @@ export class MOSProxyBuilder {
                 'MOSProxyBuilder: withHtmlRewriter(...) is required when surface decisions is enabled; call withoutSurfaceDecisions() or withoutHtmlTransformation() if you do not need it',
             )
         }
+        if (this._htmlAwareLinkRewriting && !this._htmlRewriter) {
+            throw new Error('MOSProxyBuilder: withHtmlAwareLinkRewriting() requires withHtmlRewriter(...)')
+        }
 
         const opts: MOSProxyOptions = {
             config: this._config,
@@ -139,6 +154,7 @@ export class MOSProxyBuilder {
             onHtmlPipelineError: this._onHtmlPipelineError ?? undefined,
             customEndpointsEnabled: this._customEndpoints,
             linkRewritingEnabled: this._linkRewriting,
+            htmlAwareLinkRewritingEnabled: this._htmlAwareLinkRewriting,
             surfaceDecisionsEnabled: this._surfaceDecisions,
             htmlTransformationEnabled: this._htmlTransformation,
         }

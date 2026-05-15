@@ -4,7 +4,7 @@ import type { Fetcher } from '../adapters/Fetcher'
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
 import type { MOSConfig } from '../config'
 import type { PipelineContext } from '../context'
-import type { SurfaceDecisionResponse } from '../types'
+import type { PageMetadata, SurfaceDecisionResponse } from '../types'
 import fetchSurfaceDecisions from './fetchSurfaceDecisions'
 import { parsePageMetadata } from './pageMetadata'
 
@@ -15,12 +15,24 @@ export default async function getSurfaceDecisions(
     apiFetcher: Fetcher,
     rewriter: HtmlRewriterAdapter | null,
     clientMetadataProvider: ClientMetadataProvider | null,
+    // When provided (i.e. linkRewriting already extracted it during its parse pass), we drain a
+    // tee branch to drive the upstream rewriter to completion and read from this object — saving
+    // one full HTML parse compared to running parsePageMetadata separately.
+    providedPageMetadata: PageMetadata | null = null,
 ): Promise<[Response, SurfaceDecisionResponse | null]> {
     const { config, logger } = ctx
     const { anonymousIdentifier, userJwt } = getExistingCookies(request, response, config)
 
     const [metadataStream, passThroughStream] = response.body?.tee() ?? [null, null]
-    const pageMetadata = metadataStream && rewriter ? await parsePageMetadata(ctx, new Response(metadataStream, response), rewriter) : {}
+    let pageMetadata: PageMetadata = {}
+    if (providedPageMetadata && metadataStream) {
+        // Drain the tee branch so the upstream linkRewriting session runs end-to-end; that
+        // mutates providedPageMetadata as <meta> elements pass through.
+        await drainStream(metadataStream)
+        pageMetadata = providedPageMetadata
+    } else if (metadataStream && rewriter) {
+        pageMetadata = await parsePageMetadata(ctx, new Response(metadataStream, response), rewriter)
+    }
     let modifiedResponse = passThroughStream ? new Response(passThroughStream, response) : response
 
     const clientMetadata = clientMetadataProvider?.build(request) ?? {}
@@ -68,6 +80,17 @@ export default async function getSurfaceDecisions(
     }
 
     return [modifiedResponse, surfaceDecisions]
+}
+
+const drainStream = async (stream: ReadableStream<Uint8Array>) => {
+    const reader = stream.getReader()
+    try {
+        while (!(await reader.read()).done) {
+            // discard
+        }
+    } finally {
+        reader.releaseLock()
+    }
 }
 
 const getExistingCookies = (request: Request, originResponse: Response, config: MOSConfig) => {
