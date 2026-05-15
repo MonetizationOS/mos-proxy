@@ -250,7 +250,7 @@ describe('MOSProxy pipeline', () => {
         expect(response.status).toBe(402)
     })
 
-    it('forwards client metadata from the provider under the legacy cloudflare field', async () => {
+    it('spreads client metadata from the provider into the surface decisions body', async () => {
         const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
         const apiFetcher = MockFetcher(() => decisionsResponse())
 
@@ -259,14 +259,15 @@ describe('MOSProxy pipeline', () => {
             .withOriginFetcher(originFetcher)
             .withApiFetcher(apiFetcher)
             .withHtmlRewriter(new PassthroughHtmlRewriter())
-            .withClientMetadata({ build: () => ({ cf: { country: 'US' } }) })
+            .withClientMetadata({ build: () => ({ fastly: { client: { geo: { country_code: 'US' } } } }) })
             .build()
 
         await proxy.handle(new Request('https://proxy.example.com/article'))
         const sent = apiFetcher.calls[0]?.request
         expect(sent).toBeDefined()
         const payload = JSON.parse(await sent!.clone().text())
-        expect(payload.cloudflare).toEqual({ cf: { country: 'US' } })
+        expect(payload.fastly).toEqual({ client: { geo: { country_code: 'US' } } })
+        expect(payload.cloudflare).toBeUndefined()
     })
 
     it('fails open for surface decisions API failures and returns the rewritten response', async () => {
