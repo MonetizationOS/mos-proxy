@@ -1,5 +1,5 @@
 import type { Fetcher } from '../adapters/Fetcher'
-import { withMosProxyVersionHeader } from '../apiRequestHeaders'
+import { withMosProxyHeaders } from '../apiRequestHeaders'
 import type { PipelineContext } from '../context'
 import type { PageMetadata, SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
 
@@ -55,7 +55,7 @@ export default async function fetchSurfaceDecisions(
     const request = new Request(new URL('/api/v1/surface-decisions', config.mosHost), {
         method: 'POST',
         body,
-        headers: withMosProxyVersionHeader({
+        headers: withMosProxyHeaders({
             'Content-Type': 'application/json',
             Authorization: `Bearer ${config.mosSecretKey}`,
         }),

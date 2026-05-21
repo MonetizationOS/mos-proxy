@@ -1,12 +1,16 @@
+import { formatClientRuntimeHeader } from './clientRuntime'
+
 export const MOS_PROXY_VERSION_HEADER = 'X-MOS-Proxy-Version'
+export const MOS_PROXY_CLIENT_HEADER = 'X-MOS-Proxy-Client'
 export const MOS_PROXY_PACKAGE_VERSION = '1.0.1'
 
-export const setMosProxyVersionHeader = (headers: Headers): void => {
+export const setMosProxyHeaders = (headers: Headers): void => {
     headers.set(MOS_PROXY_VERSION_HEADER, MOS_PROXY_PACKAGE_VERSION)
+    headers.set(MOS_PROXY_CLIENT_HEADER, formatClientRuntimeHeader())
 }
 
-export const withMosProxyVersionHeader = (headers?: HeadersInit): Headers => {
+export const withMosProxyHeaders = (headers?: HeadersInit): Headers => {
     const next = new Headers(headers)
-    setMosProxyVersionHeader(next)
+    setMosProxyHeaders(next)
     return next
 }

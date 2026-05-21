@@ -1,5 +1,5 @@
 import type { Fetcher } from '../adapters/Fetcher'
-import { setMosProxyVersionHeader } from '../apiRequestHeaders'
+import { setMosProxyHeaders } from '../apiRequestHeaders'
 import type { PipelineContext } from '../context'
 
 export default async function customEndpointRequest(ctx: PipelineContext, request: Request, apiFetcher: Fetcher): Promise<Response | null> {
@@ -18,6 +18,6 @@ export default async function customEndpointRequest(ctx: PipelineContext, reques
     target.pathname = `/api/v1/envs/${config.mosEnvironment}/endpoints/${requestUrl.pathname.slice(prefix.length).replace(/^\//, '')}`
 
     const apiRequest = new Request(target, request)
-    setMosProxyVersionHeader(apiRequest.headers)
+    setMosProxyHeaders(apiRequest.headers)
     return apiFetcher(apiRequest)
 }
