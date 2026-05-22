@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.0.2
+
+### Patch Changes
+
+- [#6](https://github.com/MonetizationOS/mos-proxy/pull/6) [`b010a7d`](https://github.com/MonetizationOS/mos-proxy/commit/b010a7de017ae7b9542df5ed4c72a2dc6bb51904) Thanks [@benney](https://github.com/benney)! - Add client runtime information to MOS proxy requests
+
 ## 1.0.1
 
 ### Patch Changes
