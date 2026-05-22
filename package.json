@@ -1,6 +1,6 @@
 {
     "name": "@monetizationos/proxy",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Platform-agnostic MonetizationOS proxy core",
     "license": "MIT",
     "type": "module",
