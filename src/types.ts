@@ -130,3 +130,24 @@ export interface MOSConfigInput {
     /** Optional headers added to or replacing client headers on every origin request. */
     originRequestHeaders?: Record<string, string>
 }
+
+export type FetchSurfaceDecisionsFailureReason = 'request-failed' | 'invalid-json' | 'api-error' | 'http-error' | 'invalid-response'
+
+export interface MOSProxyApiRetryContext {
+    error: unknown
+    reason: FetchSurfaceDecisionsFailureReason
+    status?: number
+    statusCode?: number
+    attempt: number
+    request: Request
+}
+
+export interface MOSProxyApiRetryResult {
+    retry: boolean
+    identity?: {
+        anonymousIdentifier: string | undefined
+        userJwt: string | undefined
+    }
+}
+
+export type MOSProxyApiRetryHandler = (ctx: MOSProxyApiRetryContext) => MOSProxyApiRetryResult | Promise<MOSProxyApiRetryResult>

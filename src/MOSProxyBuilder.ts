@@ -3,7 +3,7 @@ import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
 import type { MOSProxyLogger } from './logger'
 import { MOSProxy, type MOSProxyHtmlPipelineErrorHandler, type MOSProxyOptions } from './MOSProxy'
-import type { MOSConfigInput } from './types'
+import type { MOSConfigInput, MOSProxyApiRetryHandler } from './types'
 
 /**
  * Fluent builder for `MOSProxy`. Provide configuration and platform adapters, then `build()`.
@@ -44,6 +44,7 @@ export class MOSProxyBuilder {
     private _clientMetadataProvider: ClientMetadataProvider | null = null
     private _logger: MOSProxyLogger | null = null
     private _onHtmlPipelineError: MOSProxyHtmlPipelineErrorHandler | null = null
+    private _onApiRetry: MOSProxyApiRetryHandler | null = null
     private _customEndpoints = true
     private _linkRewriting = true
     private _surfaceDecisions = true
@@ -88,6 +89,16 @@ export class MOSProxyBuilder {
      */
     withHtmlPipelineErrorHandler(handler: MOSProxyHtmlPipelineErrorHandler): this {
         this._onHtmlPipelineError = handler
+        return this
+    }
+
+    /**
+     * Register a callback to handle MOS API call errors. If the API errors out, this callback is
+     * called and can return an instruction to retry the call (optionally with overridden identity
+     * credentials, e.g. retrying with an anonymous session or creating a new anonymous session).
+     */
+    withApiRetryCallback(handler: MOSProxyApiRetryHandler): this {
+        this._onApiRetry = handler
         return this
     }
 
@@ -137,6 +148,7 @@ export class MOSProxyBuilder {
             clientMetadataProvider: this._clientMetadataProvider,
             logger: this._logger ?? undefined,
             onHtmlPipelineError: this._onHtmlPipelineError ?? undefined,
+            onApiRetry: this._onApiRetry ?? undefined,
             customEndpointsEnabled: this._customEndpoints,
             linkRewritingEnabled: this._linkRewriting,
             surfaceDecisionsEnabled: this._surfaceDecisions,

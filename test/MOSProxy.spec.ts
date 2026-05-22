@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ElementHandlers, HtmlRewriterAdapter, HtmlRewriterCapabilities, HtmlRewriterSession } from '../src/adapters'
 import { MOSProxyBuilder } from '../src/index'
 import type { MOSProxyLogEvent } from '../src/logger'
-import type { MOSConfigInput, SurfaceDecisionResponse } from '../src/types'
+import type { MOSConfigInput, MOSProxyApiRetryContext, SurfaceDecisionResponse } from '../src/types'
 import { MockFetcher } from './fakes/MockFetcher'
 import { PassthroughHtmlRewriter } from './fakes/PassthroughHtmlRewriter'
 
@@ -463,5 +463,117 @@ describe('MOSProxyBuilder validation', () => {
                 .withApiFetcher(MockFetcher(() => new Response(null)))
                 .build(),
         ).toThrow(/withHtmlRewriter/)
+    })
+})
+
+describe('MOSProxy API error retry callback', () => {
+    it('calls retry callback on API error, retries with overridden identity and succeeds', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        let callCount = 0
+        const apiFetcher = MockFetcher((_req) => {
+            callCount++
+            if (callCount === 1) {
+                // First call: Simulate 401 Unauthorized from the API
+                return new Response(
+                    JSON.stringify({
+                        status: 'error',
+                        message: 'Unauthorized jwt',
+                        statusCode: 401,
+                    }),
+                    { status: 401, headers: { 'Content-Type': 'application/json' } },
+                )
+            }
+            // Second call: Return success with anonymous session ID
+            return decisionsResponse({
+                identity: { identifier: 'anon-retry-123', isAuthenticated: false, authType: 'anonymous', jwtClaims: {} },
+            })
+        })
+
+        const retryCalls: MOSProxyApiRetryContext[] = []
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withApiRetryCallback(async (ctx) => {
+                retryCalls.push(ctx)
+                expect(ctx.attempt).toBe(1)
+                expect(ctx.statusCode).toBe(401)
+                expect(ctx.status).toBe(401)
+                expect(ctx.reason).toBe('api-error')
+                return {
+                    retry: true,
+                    identity: {
+                        anonymousIdentifier: undefined,
+                        userJwt: undefined,
+                    },
+                }
+            })
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: '__session=expired-jwt-token' },
+            }),
+        )
+
+        expect(response.status).toBe(200)
+        expect(callCount).toBe(2)
+        expect(retryCalls.length).toBe(1)
+        // Verify we correctly set the anonymous session cookie since the retry successfully returned a new anonymous identity
+        expect(response.headers.getSetCookie()).toContain('anon-session=anon-retry-123; Path=/')
+    })
+
+    it('strictly limits retrying to at most 1 retry attempt even if retry handler requests more', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        let callCount = 0
+        const apiFetcher = MockFetcher(() => {
+            callCount++
+            return new Response(
+                JSON.stringify({
+                    status: 'error',
+                    message: 'Internal error',
+                    statusCode: 500,
+                }),
+                { status: 500, headers: { 'Content-Type': 'application/json' } },
+            )
+        })
+
+        const retryCalls: MOSProxyApiRetryContext[] = []
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withApiRetryCallback((ctx) => {
+                retryCalls.push(ctx)
+                return { retry: true }
+            })
+            .build()
+
+        const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+
+        expect(response.status).toBe(200) // Fails open
+        expect(callCount).toBe(2) // 1 initial + 1 retry (strictly capped!)
+        expect(retryCalls.length).toBe(1) // only called for the first failure
+        expect(retryCalls[0]?.attempt).toBe(1)
+    })
+
+    it('fails open gracefully if retry callback throws', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        const apiFetcher = MockFetcher(() => new Response(null, { status: 500 }))
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withApiRetryCallback(() => {
+                throw new Error('Callback failed')
+            })
+            .build()
+
+        const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+        expect(response.status).toBe(200)
     })
 })

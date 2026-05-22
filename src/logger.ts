@@ -1,4 +1,4 @@
-export type MOSProxyLogLevel = 'warn' | 'error'
+export type MOSProxyLogLevel = 'info' | 'warn' | 'error'
 
 export type MOSProxyLogCode =
     | 'html-pipeline-failed'
@@ -7,6 +7,8 @@ export type MOSProxyLogCode =
     | 'invalid-ignore-path-pattern'
     | 'response-clone-failed'
     | 'surface-decisions-api-failed'
+    | 'surface-decisions-api-retry'
+    | 'surface-decisions-api-retry-handler-threw'
     | 'link-rewriting-header-failed'
     | 'link-rewriting-body-failed'
     | 'marker-pass-invalid-state'
@@ -41,6 +43,11 @@ export const consoleLogger: MOSProxyLogger = {
 
         if (event.level === 'error') {
             console.error(...details)
+            return
+        }
+
+        if (event.level === 'info') {
+            console.info(...details)
             return
         }
 
