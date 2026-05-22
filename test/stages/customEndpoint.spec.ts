@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MOS_PROXY_PACKAGE_VERSION, MOS_PROXY_VERSION_HEADER } from '../../src/apiRequestHeaders'
+import { MOS_PROXY_CLIENT_HEADER, MOS_PROXY_PACKAGE_VERSION, MOS_PROXY_VERSION_HEADER } from '../../src/apiRequestHeaders'
 import { type MOSConfig, normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
 import type { MOSProxyLogger } from '../../src/logger'
@@ -47,6 +47,7 @@ describe('customEndpointRequest', () => {
         expect(sent.url).toBe('https://api.monetizationos.com/api/v1/envs/env_test/endpoints/foo/bar?x=1')
         expect(sent.method).toBe('POST')
         expect(sent.headers.get(MOS_PROXY_VERSION_HEADER)).toBe(MOS_PROXY_PACKAGE_VERSION)
+        expect(sent.headers.get(MOS_PROXY_CLIENT_HEADER)).toMatch(/^runtime=/)
         expect(await sent.text()).toBe('payload')
     })
 

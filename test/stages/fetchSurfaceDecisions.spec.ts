@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MOS_PROXY_PACKAGE_VERSION, MOS_PROXY_VERSION_HEADER } from '../../src/apiRequestHeaders'
+import { MOS_PROXY_CLIENT_HEADER, MOS_PROXY_PACKAGE_VERSION, MOS_PROXY_VERSION_HEADER } from '../../src/apiRequestHeaders'
 import { normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
 import type { MOSProxyLogger } from '../../src/logger'
@@ -62,6 +62,7 @@ describe('fetchSurfaceDecisions', () => {
         expect(req.headers.get('Authorization')).toBe('Bearer sk_env_test_abc')
         expect(req.headers.get('Content-Type')).toBe('application/json')
         expect(req.headers.get(MOS_PROXY_VERSION_HEADER)).toBe(MOS_PROXY_PACKAGE_VERSION)
+        expect(req.headers.get(MOS_PROXY_CLIENT_HEADER)).toMatch(/^runtime=/)
 
         const body = JSON.parse(await req.clone().text())
         expect(body).toEqual({
