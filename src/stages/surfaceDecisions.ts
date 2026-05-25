@@ -5,7 +5,7 @@ import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
 import type { MOSConfig } from '../config'
 import type { PipelineContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
-import fetchSurfaceDecisions from './fetchSurfaceDecisions'
+import fetchSurfaceDecisions, { type FetchSurfaceDecisionsResult } from './fetchSurfaceDecisions'
 import { parsePageMetadata } from './pageMetadata'
 
 export default async function getSurfaceDecisions(
@@ -24,21 +24,49 @@ export default async function getSurfaceDecisions(
     let modifiedResponse = passThroughStream ? new Response(passThroughStream, response) : response
 
     const clientMetadata = clientMetadataProvider?.build(request) ?? {}
+    const fetchArgs = {
+        path: new URL(request.url).pathname,
+        url: request.url,
+        clientMetadata,
+        pageMetadata,
+        userAgent: request.headers.get('User-Agent') ?? undefined,
+        originStatus: response.status,
+    }
 
-    const result = await fetchSurfaceDecisions(
+    let result = await fetchSurfaceDecisions(
         ctx,
         {
+            ...fetchArgs,
             anonymousIdentifier,
             userJwt,
-            path: new URL(request.url).pathname,
-            url: request.url,
-            clientMetadata,
-            pageMetadata,
-            userAgent: request.headers.get('User-Agent') ?? undefined,
-            originStatus: response.status,
         },
         apiFetcher,
     )
+
+    let retriedAsAnonymous = false
+    if (!result.ok && userJwt && isUnauthorized(result)) {
+        logger.log({
+            level: 'warn',
+            code: 'surface-decisions-jwt-rejected',
+            message: 'Surface decisions rejected the user JWT; retrying as anonymous.',
+            context: {
+                reason: result.reason,
+                status: result.status,
+                statusCode: result.statusCode,
+            },
+            error: result.error,
+        })
+
+        result = await fetchSurfaceDecisions(
+            ctx,
+            {
+                ...fetchArgs,
+                anonymousIdentifier,
+            },
+            apiFetcher,
+        )
+        retriedAsAnonymous = true
+    }
 
     if (!result.ok) {
         logger.log({
@@ -49,6 +77,7 @@ export default async function getSurfaceDecisions(
                 reason: result.reason,
                 status: result.status,
                 statusCode: result.statusCode,
+                retriedAsAnonymous,
             },
             error: result.error,
         })
@@ -56,18 +85,52 @@ export default async function getSurfaceDecisions(
     }
 
     const surfaceDecisions = result.data
-
-    if (!anonymousIdentifier && !userJwt && surfaceDecisions?.identity?.identifier) {
-        const headers = new Headers(modifiedResponse.headers)
-        headers.append('Set-Cookie', `${config.anonymousSessionCookieName}=${surfaceDecisions.identity.identifier}; Path=/`)
-        modifiedResponse = new Response(modifiedResponse.body, {
-            status: modifiedResponse.status,
-            statusText: modifiedResponse.statusText,
-            headers,
-        })
-    }
+    modifiedResponse = applyIdentityCookies(
+        modifiedResponse,
+        config,
+        { anonymousIdentifier, userJwt },
+        surfaceDecisions,
+        retriedAsAnonymous,
+    )
 
     return [modifiedResponse, surfaceDecisions]
+}
+
+const isUnauthorized = (result: Extract<FetchSurfaceDecisionsResult, { ok: false }>): boolean =>
+    result.status === 401 || result.statusCode === 401
+
+const applyIdentityCookies = (
+    response: Response,
+    config: MOSConfig,
+    identity: { anonymousIdentifier?: string | undefined; userJwt?: string | undefined },
+    surfaceDecisions: SurfaceDecisionResponse,
+    clearUserJwt: boolean,
+): Response => {
+    const headers = new Headers(response.headers)
+    let changed = false
+
+    const shouldSetAnonymousCookie =
+        Boolean(surfaceDecisions.identity?.identifier) && !identity.anonymousIdentifier && (!identity.userJwt || clearUserJwt)
+
+    if (shouldSetAnonymousCookie) {
+        headers.append('Set-Cookie', `${config.anonymousSessionCookieName}=${surfaceDecisions.identity.identifier}; Path=/`)
+        changed = true
+    }
+
+    if (clearUserJwt) {
+        headers.append('Set-Cookie', `${config.authenticatedUserJwtCookieName}=; Path=/; Max-Age=0`)
+        changed = true
+    }
+
+    if (!changed) {
+        return response
+    }
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+    })
 }
 
 const getExistingCookies = (request: Request, originResponse: Response, config: MOSConfig) => {

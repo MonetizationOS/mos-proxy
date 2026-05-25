@@ -297,6 +297,47 @@ describe('MOSProxy pipeline', () => {
         )
     })
 
+    it('applies anonymous paywall when MOS rejects the user JWT with 401', async () => {
+        const { events, logger } = createMemoryLogger()
+        const originFetcher = MockFetcher(() => htmlResponse('<p>origin</p>', { status: 200 }))
+        const apiFetcher = MockFetcher(async (req) => {
+            const body = JSON.parse(await req.clone().text())
+            if ('userJwt' in body.identity) {
+                return new Response(JSON.stringify({ status: 'error', message: 'invalid jwt', statusCode: 401 }), {
+                    status: 401,
+                    headers: { 'Content-Type': 'application/json' },
+                })
+            }
+            return decisionsResponse({
+                surfaceBehavior: { http: { body: 'paywall' } },
+            })
+        })
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withLogger(logger)
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: '__session=bad-jwt' },
+            }),
+        )
+
+        expect(await response.text()).toBe('paywall')
+        expect(apiFetcher.calls.length).toBe(2)
+        expect(response.headers.getSetCookie()).toContain('__session=; Path=/; Max-Age=0')
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                level: 'warn',
+                code: 'surface-decisions-jwt-rejected',
+            }),
+        )
+    })
+
     it('fails open with the last safe response when local HTML transformation fails', async () => {
         const { events, logger } = createMemoryLogger()
         const originFetcher = MockFetcher(() => htmlResponse('<a href="https://origin.example.com/other">x</a>', { status: 200 }))
