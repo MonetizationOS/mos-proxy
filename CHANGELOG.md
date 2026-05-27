@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.0.3
+
+### Patch Changes
+
+- [#7](https://github.com/MonetizationOS/mos-proxy/pull/7) [`5af7b90`](https://github.com/MonetizationOS/mos-proxy/commit/5af7b9089737209640f8de74591189882e5ae186) Thanks [@benney](https://github.com/benney)! - Link rewriting improvements via compiled regex reuse
+
 ## 1.0.2
 
 ### Patch Changes
