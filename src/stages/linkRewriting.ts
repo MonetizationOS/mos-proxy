@@ -1,16 +1,17 @@
 import type { PipelineContext } from '../context'
 import { statusAllowsBody } from '../http'
-import transformOriginLinks from './transformOriginLinks'
+import compileOriginLinkRewriter from './originLinkRewriter'
 
 export default async function rewriteOriginResponse(ctx: PipelineContext, request: Request, response: Response): Promise<Response> {
     const { config, logger } = ctx
     const requestUrl = new URL(request.url)
     const originUrl = config.originUrl
+    const originLinkRewriter = compileOriginLinkRewriter(requestUrl, originUrl)
 
     const headers = new Headers()
     response.headers.forEach((value, name) => {
         try {
-            headers.append(name, transformOriginLinks(requestUrl, originUrl, value))
+            headers.append(name, originLinkRewriter(value))
         } catch (error) {
             logger.log({
                 level: 'error',
@@ -39,5 +40,5 @@ export default async function rewriteOriginResponse(ctx: PipelineContext, reques
         return new Response(null, init)
     }
 
-    return new Response(transformOriginLinks(requestUrl, originUrl, body), init)
+    return new Response(originLinkRewriter(body), init)
 }
