@@ -12,7 +12,7 @@ import shouldIgnorePath from './stages/shouldIgnorePath'
 import handleSurfaceBehavior from './stages/surfaceBehavior'
 import handleSurfaceComponents from './stages/surfaceComponents'
 import getSurfaceDecisions from './stages/surfaceDecisions'
-import type { MOSConfigInput } from './types'
+import type { MOSConfigInput, MOSProxyApiRetryHandler } from './types'
 
 export type MOSProxyHtmlPipelineStage =
     | 'origin-response'
@@ -45,6 +45,7 @@ export interface MOSProxyOptions {
     clientMetadataProvider: ClientMetadataProvider | null
     logger?: MOSProxyLogger
     onHtmlPipelineError?: MOSProxyHtmlPipelineErrorHandler
+    onApiRetry?: MOSProxyApiRetryHandler
     customEndpointsEnabled: boolean
     linkRewritingEnabled: boolean
     surfaceDecisionsEnabled: boolean
@@ -63,8 +64,15 @@ export class MOSProxy {
     }
 
     async handle(request: Request): Promise<Response> {
-        const { originFetcher, apiFetcher, htmlRewriter, clientMetadataProvider, onHtmlPipelineError } = this.opts
-        const logger = this.opts.logger ?? consoleLogger
+        const {
+            originFetcher,
+            apiFetcher,
+            htmlRewriter,
+            clientMetadataProvider,
+            onHtmlPipelineError,
+            onApiRetry,
+            logger = consoleLogger,
+        } = this.opts
         const ctx: PipelineContext = { config: this.config, logger }
 
         // Stage 1a: custom endpoint routing
@@ -119,6 +127,7 @@ export class MOSProxy {
                 apiFetcher,
                 htmlRewriter,
                 clientMetadataProvider,
+                onApiRetry,
             )
             if (!surfaceDecisions) {
                 return modifiedResponse

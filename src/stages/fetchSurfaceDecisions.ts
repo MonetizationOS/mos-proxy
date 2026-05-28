@@ -1,7 +1,7 @@
 import type { Fetcher } from '../adapters/Fetcher'
 import { withMosProxyHeaders } from '../apiRequestHeaders'
 import type { PipelineContext } from '../context'
-import type { PageMetadata, SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
+import type { FetchSurfaceDecisionsFailureReason, PageMetadata, SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
 
 export type FetchSurfaceDecisionsArgs = {
     anonymousIdentifier?: string | undefined
@@ -13,8 +13,6 @@ export type FetchSurfaceDecisionsArgs = {
     userAgent?: string | undefined
     originStatus: number
 }
-
-export type FetchSurfaceDecisionsFailureReason = 'request-failed' | 'invalid-json' | 'api-error' | 'http-error' | 'invalid-response'
 
 export type FetchSurfaceDecisionsResult =
     | {
