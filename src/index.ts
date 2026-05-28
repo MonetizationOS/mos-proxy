@@ -6,9 +6,20 @@ export type {
     HtmlRewriterAdapter,
     HtmlRewriterCapabilities,
     HtmlRewriterSession,
+    Identity,
+    IdentityProvider,
+    PersistIdentityArgs,
+    ResolveIdentityArgs,
     RewriterElement,
     RewriterText,
 } from './adapters'
+export {
+    buildIdentity,
+    defaultPersistIdentity,
+    defaultResolveIdentity,
+    getExistingCookies,
+} from './adapters'
+export type { MOSConfig } from './config'
 export type { MOSProxyLogCode, MOSProxyLogEvent, MOSProxyLogger, MOSProxyLogLevel } from './logger'
 export {
     MOSProxy,
