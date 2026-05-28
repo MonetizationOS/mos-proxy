@@ -38,7 +38,11 @@ export default async function fetchSurfaceDecisions(
     const body = JSON.stringify({
         ...clientMetadata,
         surfaceSlug: config.surfaceSlug,
-        identity: buildIdentity({ anonymousIdentifier, userJwt }),
+        identity: buildIdentity({
+            anonymousIdentifier,
+            userJwt,
+            createAnonymousIdentifierFallback: config.createAnonymousIdentifierFallback,
+        }),
         resource: {
             id: path,
             meta: pageMetadata,
@@ -108,11 +112,20 @@ export default async function fetchSurfaceDecisions(
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
-const buildIdentity = ({ anonymousIdentifier, userJwt }: Pick<FetchSurfaceDecisionsArgs, 'anonymousIdentifier' | 'userJwt'>) => {
+const buildIdentity = ({
+    anonymousIdentifier,
+    userJwt,
+    createAnonymousIdentifierFallback,
+}: Pick<FetchSurfaceDecisionsArgs, 'anonymousIdentifier' | 'userJwt'> & {
+    createAnonymousIdentifierFallback: boolean
+}) => {
     if (!anonymousIdentifier && !userJwt) {
         return { createAnonymousIdentifier: true }
     }
-    return userJwt ? { userJwt } : { anonymousIdentifier }
+    if (userJwt) {
+        return createAnonymousIdentifierFallback ? { userJwt, createAnonymousIdentifierFallback: true } : { userJwt }
+    }
+    return { anonymousIdentifier }
 }
 
 const isSurfaceDecisionError = (value: unknown): value is SurfaceDecisionError =>

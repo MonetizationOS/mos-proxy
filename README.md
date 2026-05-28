@@ -29,6 +29,7 @@ const proxy = new MOSProxyBuilder()
         mosEndpointsPrefix: "/mos-endpoints/",
         anonymousSessionCookieName: "anon-session-id",
         authenticatedUserJwtCookieName: "__session",
+        createAnonymousIdentifierFallback: true,
         injectScriptUrl: "https://assets.monetizationos.com/web-components-latest.js",
         originRequestHeaders: { "X-Api-Key": process.env.ORIGIN_API_KEY! },
     })
