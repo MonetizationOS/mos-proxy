@@ -57,17 +57,37 @@ export default async function getSurfaceDecisions(
 
     const surfaceDecisions = result.data
 
-    if (!anonymousIdentifier && !userJwt && surfaceDecisions?.identity?.identifier) {
-        const headers = new Headers(modifiedResponse.headers)
-        headers.append('Set-Cookie', `${config.anonymousSessionCookieName}=${surfaceDecisions.identity.identifier}; Path=/`)
-        modifiedResponse = new Response(modifiedResponse.body, {
-            status: modifiedResponse.status,
-            statusText: modifiedResponse.statusText,
-            headers,
-        })
-    }
+    modifiedResponse = applyIdentityCookies(modifiedResponse, config, { anonymousIdentifier, userJwt }, surfaceDecisions)
 
     return [modifiedResponse, surfaceDecisions]
+}
+
+const applyIdentityCookies = (
+    response: Response,
+    config: MOSConfig,
+    identity: { anonymousIdentifier?: string | undefined; userJwt?: string | undefined },
+    surfaceDecisions: SurfaceDecisionResponse,
+): Response => {
+    const jwtFallbackToAnonymous =
+        config.createAnonymousIdentifierFallback &&
+        Boolean(identity.userJwt) &&
+        Boolean(surfaceDecisions.identity?.identifier) &&
+        !surfaceDecisions.identity.isAuthenticated
+
+    const shouldSetAnonymousCookie =
+        Boolean(surfaceDecisions.identity?.identifier) && !identity.anonymousIdentifier && (!identity.userJwt || jwtFallbackToAnonymous)
+
+    if (!shouldSetAnonymousCookie) {
+        return response
+    }
+
+    const headers = new Headers(response.headers)
+    headers.append('Set-Cookie', `${config.anonymousSessionCookieName}=${surfaceDecisions.identity.identifier}; Path=/`)
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+    })
 }
 
 const getExistingCookies = (request: Request, originResponse: Response, config: MOSConfig) => {

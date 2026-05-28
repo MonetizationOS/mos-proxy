@@ -105,7 +105,46 @@ describe('fetchSurfaceDecisions', () => {
         await fetchSurfaceDecisions(ctx, args({ anonymousIdentifier: 'anon-abc', userJwt: 'jwt-token' }), fetcher)
 
         const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.identity).toEqual({ userJwt: 'jwt-token', createAnonymousIdentifierFallback: true })
+    })
+
+    it('includes createAnonymousIdentifierFallback for JWT requests by default', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(ctx, args({ userJwt: 'jwt-token' }), fetcher)
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.identity).toEqual({ userJwt: 'jwt-token', createAnonymousIdentifierFallback: true })
+    })
+
+    it('does not include createAnonymousIdentifierFallback when disabled', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+        const noFallbackCtx: PipelineContext = {
+            ...ctx,
+            config: normalizeMOSConfig({
+                originUrl: 'https://origin.example.com',
+                surfaceSlug: 'web',
+                mosHost: 'https://api.monetizationos.com',
+                mosSecretKey: 'sk_env_test_abc',
+                anonymousSessionCookieName: 'anon-session',
+                authenticatedUserJwtCookieName: '__session',
+                createAnonymousIdentifierFallback: false,
+            }),
+        }
+
+        await fetchSurfaceDecisions(noFallbackCtx, args({ userJwt: 'jwt-token' }), fetcher)
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
         expect(body.identity).toEqual({ userJwt: 'jwt-token' })
+    })
+
+    it('does not include createAnonymousIdentifierFallback for anonymous identity requests', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(ctx, args({ anonymousIdentifier: 'anon-abc' }), fetcher)
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.identity).toEqual({ anonymousIdentifier: 'anon-abc' })
     })
 
     it('reports request-failed when the API fetcher throws', async () => {

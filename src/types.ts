@@ -129,4 +129,10 @@ export interface MOSConfigInput {
     surfaceDecisionsIgnorePaths?: string
     /** Optional headers added to or replacing client headers on every origin request. */
     originRequestHeaders?: Record<string, string>
+    /**
+     * When true (default), JWT surface-decision requests include `createAnonymousIdentifierFallback: true`
+     * so MonetizationOS can mint an anonymous identifier if JWT authentication fails.
+     * Set to `false` to opt out.
+     */
+    createAnonymousIdentifierFallback?: boolean
 }

@@ -198,7 +198,7 @@ describe('MOSProxy pipeline', () => {
         const sent = apiFetcher.calls[0]?.request
         expect(sent).toBeDefined()
         const payload = JSON.parse(await sent!.clone().text())
-        expect(payload.identity).toEqual({ userJwt: 'jwt-token' })
+        expect(payload.identity).toEqual({ userJwt: 'jwt-token', createAnonymousIdentifierFallback: true })
     })
 
     it('skips surface decisions when path matches ignore patterns', async () => {

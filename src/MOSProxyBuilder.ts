@@ -29,6 +29,7 @@ import type { MOSConfigInput } from './types'
  *         injectScriptUrl: 'https://assets.monetizationos.com/web-components-latest.js',
  *         surfaceDecisionsIgnorePaths: '',
  *         originRequestHeaders: { 'X-Api-Key': process.env.ORIGIN_API_KEY! },
+ *         createAnonymousIdentifierFallback: true,
  *     })
  *     .withHtmlRewriter(myHtmlRewriterAdapter)
  *     .build()

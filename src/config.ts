@@ -15,6 +15,7 @@ export interface MOSConfig {
     injectScriptUrl: string | undefined
     surfaceDecisionsIgnorePathPatterns: RegExp[]
     originRequestHeaders: Record<string, string>
+    createAnonymousIdentifierFallback: boolean
 }
 
 export function normalizeMOSConfig(config: MOSConfigInput, logger: MOSProxyLogger = consoleLogger): MOSConfig {
@@ -51,5 +52,6 @@ export function normalizeMOSConfig(config: MOSConfigInput, logger: MOSProxyLogge
         injectScriptUrl: config.injectScriptUrl,
         surfaceDecisionsIgnorePathPatterns: ignorePathPatterns,
         originRequestHeaders: { ...(config.originRequestHeaders ?? {}) },
+        createAnonymousIdentifierFallback: config.createAnonymousIdentifierFallback !== false,
     }
 }
