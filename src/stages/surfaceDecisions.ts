@@ -1,8 +1,7 @@
-import { parse, parseSetCookie } from 'cookie'
 import type { ClientMetadataProvider } from '../adapters/ClientMetadataProvider'
 import type { Fetcher } from '../adapters/Fetcher'
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
-import type { MOSConfig } from '../config'
+import { defaultPersistIdentity, defaultResolveIdentity, type Identity, type IdentityProvider } from '../adapters/IdentityProvider'
 import type { PipelineContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 import fetchSurfaceDecisions from './fetchSurfaceDecisions'
@@ -15,9 +14,23 @@ export default async function getSurfaceDecisions(
     apiFetcher: Fetcher,
     rewriter: HtmlRewriterAdapter | null,
     clientMetadataProvider: ClientMetadataProvider | null,
+    identityProvider: IdentityProvider | null,
 ): Promise<[Response, SurfaceDecisionResponse | null]> {
     const { config, logger } = ctx
-    const { anonymousIdentifier, userJwt } = getExistingCookies(request, response, config)
+
+    const resolve = identityProvider?.resolve ?? defaultResolveIdentity
+    let identity: Identity
+    try {
+        identity = await resolve({ request, originResponse: response, config, logger })
+    } catch (error) {
+        logger.log({
+            level: 'warn',
+            code: 'identity-resolve-failed',
+            message: 'Identity provider resolve threw; skipping surface decisions and returning origin response.',
+            error,
+        })
+        return [response, null]
+    }
 
     const [metadataStream, passThroughStream] = response.body?.tee() ?? [null, null]
     const pageMetadata = metadataStream && rewriter ? await parsePageMetadata(ctx, new Response(metadataStream, response), rewriter) : {}
@@ -28,8 +41,7 @@ export default async function getSurfaceDecisions(
     const result = await fetchSurfaceDecisions(
         ctx,
         {
-            anonymousIdentifier,
-            userJwt,
+            identity,
             path: new URL(request.url).pathname,
             url: request.url,
             clientMetadata,
@@ -57,49 +69,24 @@ export default async function getSurfaceDecisions(
 
     const surfaceDecisions = result.data
 
-    modifiedResponse = applyIdentityCookies(modifiedResponse, config, { anonymousIdentifier, userJwt }, surfaceDecisions)
+    const persist = identityProvider?.persist ?? defaultPersistIdentity
+    try {
+        modifiedResponse = await persist({
+            resolved: identity,
+            decisions: surfaceDecisions,
+            response: modifiedResponse,
+            request,
+            config,
+            logger,
+        })
+    } catch (error) {
+        logger.log({
+            level: 'warn',
+            code: 'identity-persist-failed',
+            message: 'Identity provider persist threw; keeping pre-persist response.',
+            error,
+        })
+    }
 
     return [modifiedResponse, surfaceDecisions]
-}
-
-const applyIdentityCookies = (
-    response: Response,
-    config: MOSConfig,
-    identity: { anonymousIdentifier?: string | undefined; userJwt?: string | undefined },
-    surfaceDecisions: SurfaceDecisionResponse,
-): Response => {
-    const jwtFallbackToAnonymous =
-        config.createAnonymousIdentifierFallback &&
-        Boolean(identity.userJwt) &&
-        Boolean(surfaceDecisions.identity?.identifier) &&
-        !surfaceDecisions.identity.isAuthenticated
-
-    const shouldSetAnonymousCookie =
-        Boolean(surfaceDecisions.identity?.identifier) && !identity.anonymousIdentifier && (!identity.userJwt || jwtFallbackToAnonymous)
-
-    if (!shouldSetAnonymousCookie) {
-        return response
-    }
-
-    const headers = new Headers(response.headers)
-    headers.append('Set-Cookie', `${config.anonymousSessionCookieName}=${surfaceDecisions.identity.identifier}; Path=/`)
-    return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-    })
-}
-
-const getExistingCookies = (request: Request, originResponse: Response, config: MOSConfig) => {
-    const setCookies = originResponse.headers.getSetCookie().map((header) => parseSetCookie(header))
-    const originAnonymousCookie = setCookies.find((s) => s.name === config.anonymousSessionCookieName)
-    const originUserJwtCookie = setCookies.find((s) => s.name === config.authenticatedUserJwtCookieName)
-    if (originAnonymousCookie || originUserJwtCookie) {
-        return { anonymousIdentifier: originAnonymousCookie?.value, userJwt: originUserJwtCookie?.value }
-    }
-
-    const cookies = parse(request.headers.get('Cookie') || '')
-    const anonymousIdentifier = cookies[config.anonymousSessionCookieName]
-    const userJwt = cookies[config.authenticatedUserJwtCookieName]
-    return { anonymousIdentifier, userJwt }
 }

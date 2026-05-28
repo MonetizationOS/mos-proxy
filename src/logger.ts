@@ -7,6 +7,8 @@ export type MOSProxyLogCode =
     | 'invalid-ignore-path-pattern'
     | 'response-clone-failed'
     | 'surface-decisions-api-failed'
+    | 'identity-resolve-failed'
+    | 'identity-persist-failed'
     | 'link-rewriting-header-failed'
     | 'link-rewriting-body-failed'
     | 'marker-pass-invalid-state'

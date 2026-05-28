@@ -39,7 +39,7 @@ const anonymousCookie = (identifier: string) => `anon-session=${identifier}; Pat
 
 const run = async (pipelineCtx: PipelineContext, request: Request, apiResponse: SurfaceDecisionResponse) => {
     const apiFetcher = MockFetcher(() => new Response(JSON.stringify(apiResponse), { status: 200 }))
-    const [response] = await getSurfaceDecisions(pipelineCtx, request, htmlResponse(), apiFetcher, null, null)
+    const [response] = await getSurfaceDecisions(pipelineCtx, request, htmlResponse(), apiFetcher, null, null, null)
     return response.headers.getSetCookie()
 }
 
