@@ -1,5 +1,15 @@
 # @monetizationos/proxy
 
+## 1.1.0
+
+### Minor Changes
+
+- [#12](https://github.com/MonetizationOS/mos-proxy/pull/12) [`10d3220`](https://github.com/MonetizationOS/mos-proxy/commit/10d322019b6cf0ee995bcda549b6536fbc701e9c) Thanks [@filipe-boleto](https://github.com/filipe-boleto)! - Add `createAnonymousIdentifierFallback` config option for JWT surface-decision requests.
+
+  When enabled (the default), JWT identity payloads include `createAnonymousIdentifierFallback: true`
+  so MonetizationOS can mint an anonymous identifier if JWT authentication fails. Set
+  `createAnonymousIdentifierFallback: false` to opt out.
+
 ## 1.0.3
 
 ### Patch Changes
