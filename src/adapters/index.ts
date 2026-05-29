@@ -9,3 +9,10 @@ export type {
     RewriterElement,
     RewriterText,
 } from './HtmlRewriterAdapter'
+export type { Identity, IdentityProvider, PersistIdentityArgs, ResolveIdentityArgs } from './IdentityProvider'
+export {
+    buildIdentity,
+    defaultPersistIdentity,
+    defaultResolveIdentity,
+    getExistingCookies,
+} from './IdentityProvider'

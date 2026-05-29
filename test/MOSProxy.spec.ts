@@ -417,6 +417,143 @@ describe('MOSProxy pipeline', () => {
     })
 })
 
+describe('MOSProxy identity provider', () => {
+    it('uses a custom resolve to drive the identity payload sent to the API', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        const apiFetcher = MockFetcher(() => decisionsResponse())
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withIdentityProvider({
+                resolve: ({ request }) => {
+                    const headerJwt = request.headers.get('X-User-JWT')
+                    return headerJwt ? { userJwt: headerJwt } : { createAnonymousIdentifier: true }
+                },
+            })
+            .build()
+
+        await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: 'anon-session=ignored', 'X-User-JWT': 'header-jwt' },
+            }),
+        )
+
+        const payload = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(payload.identity).toEqual({ userJwt: 'header-jwt' })
+    })
+
+    it('uses a custom persist to suppress the default anonymous-session cookie', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        const apiFetcher = MockFetcher(() =>
+            decisionsResponse({
+                identity: { identifier: 'anon-xyz', isAuthenticated: false, authType: 'anonymous', jwtClaims: {} },
+            }),
+        )
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withIdentityProvider({
+                persist: ({ response }) => response,
+            })
+            .build()
+
+        const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+        expect(response.headers.getSetCookie()).not.toContain('anon-session=anon-xyz; Path=/')
+    })
+
+    it('omitted methods fall back to the built-in defaults (resolve override only)', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        const apiFetcher = MockFetcher(() =>
+            decisionsResponse({
+                identity: { identifier: 'anon-xyz', isAuthenticated: false, authType: 'anonymous', jwtClaims: {} },
+            }),
+        )
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withIdentityProvider({
+                resolve: () => ({ createAnonymousIdentifier: true }),
+            })
+            .build()
+
+        const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+        expect(response.headers.getSetCookie()).toContain('anon-session=anon-xyz; Path=/')
+    })
+
+    it('fails open when a custom resolve throws: returns origin response and skips decisions', async () => {
+        const { events, logger } = createMemoryLogger()
+        const originFetcher = MockFetcher(() => htmlResponse('<a href="https://origin.example.com/x">x</a>', { status: 200 }))
+        const apiFetcher = MockFetcher(() => decisionsResponse())
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withLogger(logger)
+            .withIdentityProvider({
+                resolve: () => {
+                    throw new Error('resolve boom')
+                },
+            })
+            .build()
+
+        const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+
+        expect(await response.text()).toBe('<a href="https://proxy.example.com/x">x</a>')
+        expect(apiFetcher.calls.length).toBe(0)
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                level: 'warn',
+                code: 'identity-resolve-failed',
+            }),
+        )
+    })
+
+    it('fails open when a custom persist throws: keeps the pre-persist response', async () => {
+        const { events, logger } = createMemoryLogger()
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        const apiFetcher = MockFetcher(() =>
+            decisionsResponse({
+                identity: { identifier: 'anon-xyz', isAuthenticated: false, authType: 'anonymous', jwtClaims: {} },
+            }),
+        )
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withLogger(logger)
+            .withIdentityProvider({
+                persist: () => {
+                    throw new Error('persist boom')
+                },
+            })
+            .build()
+
+        const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+
+        expect(response.status).toBe(200)
+        expect(response.headers.getSetCookie()).not.toContain('anon-session=anon-xyz; Path=/')
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                level: 'warn',
+                code: 'identity-persist-failed',
+            }),
+        )
+    })
+})
+
 describe('MOSProxy API-only mode (withoutHtmlTransformation)', () => {
     it('bypasses the HTML pipeline and does not require an HTML rewriter', async () => {
         const originFetcher = MockFetcher(() => htmlResponse('<a href="https://origin.example.com/x">x</a>', { status: 200 }))

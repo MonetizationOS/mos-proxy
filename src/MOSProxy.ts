@@ -1,6 +1,7 @@
 import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
 import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
+import type { IdentityProvider } from './adapters/IdentityProvider'
 import { type MOSConfig, normalizeMOSConfig } from './config'
 import type { PipelineContext } from './context'
 import { consoleLogger, type MOSProxyLogger } from './logger'
@@ -43,6 +44,7 @@ export interface MOSProxyOptions {
     apiFetcher: Fetcher | null
     htmlRewriter: HtmlRewriterAdapter | null
     clientMetadataProvider: ClientMetadataProvider | null
+    identityProvider: IdentityProvider | null
     logger?: MOSProxyLogger
     onHtmlPipelineError?: MOSProxyHtmlPipelineErrorHandler
     customEndpointsEnabled: boolean
@@ -63,7 +65,7 @@ export class MOSProxy {
     }
 
     async handle(request: Request): Promise<Response> {
-        const { originFetcher, apiFetcher, htmlRewriter, clientMetadataProvider, onHtmlPipelineError } = this.opts
+        const { originFetcher, apiFetcher, htmlRewriter, clientMetadataProvider, identityProvider, onHtmlPipelineError } = this.opts
         const logger = this.opts.logger ?? consoleLogger
         const ctx: PipelineContext = { config: this.config, logger }
 
@@ -119,6 +121,7 @@ export class MOSProxy {
                 apiFetcher,
                 htmlRewriter,
                 clientMetadataProvider,
+                identityProvider,
             )
             if (!surfaceDecisions) {
                 return modifiedResponse

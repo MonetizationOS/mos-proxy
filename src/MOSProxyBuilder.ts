@@ -1,6 +1,7 @@
 import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
 import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
+import type { IdentityProvider } from './adapters/IdentityProvider'
 import type { MOSProxyLogger } from './logger'
 import { MOSProxy, type MOSProxyHtmlPipelineErrorHandler, type MOSProxyOptions } from './MOSProxy'
 import type { MOSConfigInput } from './types'
@@ -43,6 +44,7 @@ export class MOSProxyBuilder {
     private _apiFetcher: Fetcher = globalThis.fetch
     private _htmlRewriter: HtmlRewriterAdapter | null = null
     private _clientMetadataProvider: ClientMetadataProvider | null = null
+    private _identityProvider: IdentityProvider | null = null
     private _logger: MOSProxyLogger | null = null
     private _onHtmlPipelineError: MOSProxyHtmlPipelineErrorHandler | null = null
     private _customEndpoints = true
@@ -72,6 +74,18 @@ export class MOSProxyBuilder {
 
     withClientMetadata(provider: ClientMetadataProvider): this {
         this._clientMetadataProvider = provider
+        return this
+    }
+
+    /**
+     * Override identity provision for the surface-decisions API. Provide `resolve` to control the
+     * identity payload sent to the API (e.g. resolved from a request header instead of cookies),
+     * and/or `persist` to control how identity is recorded back on the response (e.g. suppress the
+     * default anonymous-session cookie or write it elsewhere). Either method is optional; omitted
+     * methods fall back to the built-in defaults.
+     */
+    withIdentityProvider(provider: IdentityProvider): this {
+        this._identityProvider = provider
         return this
     }
 
@@ -136,6 +150,7 @@ export class MOSProxyBuilder {
             apiFetcher: this._apiFetcher,
             htmlRewriter: this._htmlRewriter,
             clientMetadataProvider: this._clientMetadataProvider,
+            identityProvider: this._identityProvider,
             logger: this._logger ?? undefined,
             onHtmlPipelineError: this._onHtmlPipelineError ?? undefined,
             customEndpointsEnabled: this._customEndpoints,
