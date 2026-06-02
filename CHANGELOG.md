@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.3.0
+
+### Minor Changes
+
+- [#15](https://github.com/MonetizationOS/mos-proxy/pull/15) [`8e1bc0a`](https://github.com/MonetizationOS/mos-proxy/commit/8e1bc0a6e5eb88117cf3758319d0a24003295b9a) Thanks [@JFL110](https://github.com/JFL110)! - Add ability to call MonetizationOS API endpoints with forwarded identity
+
 ## 1.2.0
 
 ### Minor Changes
