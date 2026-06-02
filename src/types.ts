@@ -108,6 +108,12 @@ export interface SurfaceDecisionError {
     statusCode: number
 }
 
+export type MosAuthenticatedApiRoute = {
+    matchPath: string
+    method: 'POST' | 'PUT' | 'PATCH'
+    mosPath: string
+}
+
 export interface MOSConfigInput {
     /** Origin website base URL, e.g. `https://news.example.com`. */
     originUrl: string

@@ -8,12 +8,13 @@ import { consoleLogger, type MOSProxyLogger } from './logger'
 import customEndpointRequest from './stages/customEndpoint'
 import isRedirectResponse from './stages/isRedirectResponse'
 import rewriteOriginResponse from './stages/linkRewriting'
+import { handleMosAuthenticatedApiRoutes } from './stages/mosAuthenticatedApi'
 import performOriginRequest from './stages/originRequest'
 import shouldIgnorePath from './stages/shouldIgnorePath'
 import handleSurfaceBehavior from './stages/surfaceBehavior'
 import handleSurfaceComponents from './stages/surfaceComponents'
 import getSurfaceDecisions from './stages/surfaceDecisions'
-import type { MOSConfigInput } from './types'
+import type { MOSConfigInput, MosAuthenticatedApiRoute } from './types'
 
 export type MOSProxyHtmlPipelineStage =
     | 'origin-response'
@@ -51,6 +52,7 @@ export interface MOSProxyOptions {
     linkRewritingEnabled: boolean
     surfaceDecisionsEnabled: boolean
     htmlTransformationEnabled: boolean
+    mosAuthenticatedApiRoutes?: MosAuthenticatedApiRoute[]
 }
 
 /**
@@ -80,7 +82,20 @@ export class MOSProxy {
             }
         }
 
-        // Stage 1b: origin fetch
+        // Stage 1b: authenticated API routing
+        const authenticatedApiResult = await handleMosAuthenticatedApiRoutes(
+            request,
+            this.opts.mosAuthenticatedApiRoutes ?? [],
+            ctx,
+            identityProvider,
+            clientMetadataProvider,
+            apiFetcher,
+        )
+        if (authenticatedApiResult) {
+            return authenticatedApiResult
+        }
+
+        // Stage 1c: origin fetch
         const originResponse = await performOriginRequest(ctx, request, originFetcher)
 
         // Auto-skip HTML pipeline for non-HTML content, or when HTML transformation is disabled entirely
