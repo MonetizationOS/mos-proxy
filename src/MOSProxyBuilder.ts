@@ -4,7 +4,7 @@ import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
 import type { IdentityProvider } from './adapters/IdentityProvider'
 import type { MOSProxyLogger } from './logger'
 import { MOSProxy, type MOSProxyHtmlPipelineErrorHandler, type MOSProxyOptions } from './MOSProxy'
-import type { MOSConfigInput } from './types'
+import type { MOSConfigInput, MosAuthenticatedApiRoute } from './types'
 
 /**
  * Fluent builder for `MOSProxy`. Provide configuration and platform adapters, then `build()`.
@@ -51,6 +51,7 @@ export class MOSProxyBuilder {
     private _linkRewriting = true
     private _surfaceDecisions = true
     private _htmlTransformation = true
+    private _additionalAuthenticatedApiRoutes: MosAuthenticatedApiRoute[] = []
 
     withConfig(config: MOSConfigInput): this {
         this._config = config
@@ -132,6 +133,16 @@ export class MOSProxyBuilder {
         return this
     }
 
+    /**
+     * Add an additional route which, when matched by an incoming request, will be forwarded to the MonetizationOS API
+     * with authentication handled by the configured identity provider.
+     * This is in addition to the default `/mos-api/offer-redemptions` route.
+     */
+    withMosAuthenticatedApiRoutes(...routes: MosAuthenticatedApiRoute[]): this {
+        this._additionalAuthenticatedApiRoutes.push(...routes)
+        return this
+    }
+
     build(): MOSProxy {
         if (!this._config) {
             throw new Error('MOSProxyBuilder: withConfig(...) is required')
@@ -157,6 +168,14 @@ export class MOSProxyBuilder {
             linkRewritingEnabled: this._linkRewriting,
             surfaceDecisionsEnabled: this._surfaceDecisions,
             htmlTransformationEnabled: this._htmlTransformation,
+            mosAuthenticatedApiRoutes: [
+                ...this._additionalAuthenticatedApiRoutes,
+                {
+                    matchPath: '/mos-api/offer-redemptions',
+                    method: 'POST',
+                    mosPath: '/api/v1/offer-redemptions',
+                },
+            ],
         }
         return new MOSProxy(opts)
     }

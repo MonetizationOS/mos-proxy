@@ -10,7 +10,7 @@ export type Identity =
 
 export interface ResolveIdentityArgs {
     request: Request
-    originResponse: Response
+    originResponse?: Response
     config: MOSConfig
     logger: MOSProxyLogger
 }
@@ -73,7 +73,7 @@ export const buildIdentity = ({
 
 export const defaultResolveIdentity = (args: ResolveIdentityArgs): Identity =>
     buildIdentity({
-        ...getExistingCookies(args.request, args.originResponse, args.config),
+        ...(args.originResponse ? getExistingCookies(args.request, args.originResponse, args.config) : {}),
         createAnonymousIdentifierFallback: args.config.createAnonymousIdentifierFallback,
     })
 

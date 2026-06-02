@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ElementHandlers, HtmlRewriterAdapter, HtmlRewriterCapabilities, HtmlRewriterSession } from '../src/adapters'
 import { MOSProxyBuilder } from '../src/index'
 import type { MOSProxyLogEvent } from '../src/logger'
@@ -550,6 +550,128 @@ describe('MOSProxy identity provider', () => {
                 level: 'warn',
                 code: 'identity-persist-failed',
             }),
+        )
+    })
+})
+
+describe('custom authenticated API routes', () => {
+    const requestCaptor = vi.fn()
+    const apiFetcher = MockFetcher(async (request) => {
+        requestCaptor(request.url, request.method, await request.json(), [...request.headers.entries()])
+        return new Response('{"success":true}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+
+    beforeEach(() => requestCaptor.mockReset())
+
+    it('forwards matching offer redemption request', async () => {
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withApiFetcher(apiFetcher)
+            .withOriginFetcher(originFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withClientMetadata({ build: () => ({ custom: 'metadata' }) })
+            .withIdentityProvider({
+                persist: () => {
+                    throw new Error('persist boom')
+                },
+            })
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/mos-api/offer-redemptions', {
+                method: 'POST',
+                body: JSON.stringify({ offerToken: 'offer.abc' }),
+            }),
+        )
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: true })
+        expect(requestCaptor).toHaveBeenCalledExactlyOnceWith(
+            'https://api.monetizationos.com/api/v1/offer-redemptions', //
+            'POST',
+            {
+                custom: 'metadata',
+                http: { url: 'https://proxy.example.com/mos-api/offer-redemptions' },
+                identity: { createAnonymousIdentifier: true },
+                offerToken: 'offer.abc',
+            },
+            [
+                ['authorization', 'Bearer sk_env_test_abc'],
+                ['content-type', 'application/json'],
+                ['x-mos-proxy-client', expect.any(String)],
+                ['x-mos-proxy-version', expect.any(String)],
+            ],
+        )
+    })
+
+    it('requires method to match', async () => {
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withApiFetcher(apiFetcher)
+            .withOriginFetcher(originFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withClientMetadata({ build: () => ({ custom: 'metadata' }) })
+            .withIdentityProvider({
+                persist: () => {
+                    throw new Error('persist boom')
+                },
+            })
+            .build()
+
+        // Requests that don't match on method are not forwarded
+        const nonMethodMatchingResponse = await proxy.handle(
+            new Request('https://proxy.example.com/mos-api/offer-redemptions', {
+                method: 'PUT',
+                body: JSON.stringify({ offerToken: 'offer.abc' }),
+            }),
+        )
+        expect(await nonMethodMatchingResponse.text()).toBe('<p/>')
+    })
+
+    it('handles additional routes', async () => {
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withApiFetcher(apiFetcher)
+            .withOriginFetcher(originFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withClientMetadata({ build: () => ({ custom: 'metadata' }) })
+            .withIdentityProvider({
+                persist: () => {
+                    throw new Error('persist boom')
+                },
+            })
+            .withMosAuthenticatedApiRoutes({
+                matchPath: '/mos-api/custom-api',
+                method: 'PUT',
+                mosPath: '/api/v1/custom-api-forwarded',
+            })
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/mos-api/custom-api', {
+                method: 'PUT',
+                body: JSON.stringify({ prop: 'value' }),
+            }),
+        )
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: true })
+        expect(requestCaptor).toHaveBeenCalledExactlyOnceWith(
+            'https://api.monetizationos.com/api/v1/custom-api-forwarded', //
+            'PUT',
+            {
+                custom: 'metadata',
+                http: { url: 'https://proxy.example.com/mos-api/custom-api' },
+                identity: { createAnonymousIdentifier: true },
+                prop: 'value',
+            },
+            [
+                ['authorization', 'Bearer sk_env_test_abc'],
+                ['content-type', 'application/json'],
+                ['x-mos-proxy-client', expect.any(String)],
+                ['x-mos-proxy-version', expect.any(String)],
+            ],
         )
     })
 })
