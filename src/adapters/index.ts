@@ -16,3 +16,4 @@ export {
     defaultResolveIdentity,
     getExistingCookies,
 } from './IdentityProvider'
+export type { Resource, ResourceProvider } from './ResourceProvider'

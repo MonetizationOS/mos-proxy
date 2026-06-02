@@ -22,9 +22,9 @@ const ctx: PipelineContext = {
 
 const args = (overrides: Partial<FetchSurfaceDecisionsArgs> = {}): FetchSurfaceDecisionsArgs => ({
     identity: { createAnonymousIdentifier: true },
-    path: '/article',
     url: 'https://proxy.example.com/article',
     clientMetadata: {},
+    resource: { id: '/article' },
     originStatus: 200,
     ...overrides,
 })
@@ -48,7 +48,7 @@ describe('fetchSurfaceDecisions', () => {
             ctx,
             args({
                 identity: { anonymousIdentifier: 'anon-abc' },
-                pageMetadata: { description: 'd' },
+                resource: { id: '/article', meta: { description: 'd' } },
                 userAgent: 'TestAgent/1.0',
                 clientMetadata: { cloudflare: { cf: { country: 'US' } } },
             }),

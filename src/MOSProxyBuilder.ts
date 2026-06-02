@@ -2,6 +2,7 @@ import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
 import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
 import type { IdentityProvider } from './adapters/IdentityProvider'
+import type { ResourceProvider } from './adapters/ResourceProvider'
 import type { MOSProxyLogger } from './logger'
 import { MOSProxy, type MOSProxyHtmlPipelineErrorHandler, type MOSProxyOptions } from './MOSProxy'
 import type { MOSConfigInput, MosAuthenticatedApiRoute } from './types'
@@ -45,6 +46,7 @@ export class MOSProxyBuilder {
     private _htmlRewriter: HtmlRewriterAdapter | null = null
     private _clientMetadataProvider: ClientMetadataProvider | null = null
     private _identityProvider: IdentityProvider | null = null
+    private _resourceProvider: ResourceProvider | null = null
     private _logger: MOSProxyLogger | null = null
     private _onHtmlPipelineError: MOSProxyHtmlPipelineErrorHandler | null = null
     private _customEndpoints = true
@@ -87,6 +89,17 @@ export class MOSProxyBuilder {
      */
     withIdentityProvider(provider: IdentityProvider): this {
         this._identityProvider = provider
+        return this
+    }
+
+    /**
+     * Override the resource object sent to the surface-decisions API per request. `build` receives
+     * only the `Request`; the proxy derives defaults (`{ id: pathname, meta: pageMetadata }`) and
+     * shallow-merges your returned record over them. Return only the keys you want to add or
+     * override (e.g. a content tier or canonical id) — `id`/`meta` are preserved unless you set them.
+     */
+    withResourceProvider(provider: ResourceProvider): this {
+        this._resourceProvider = provider
         return this
     }
 
@@ -162,6 +175,7 @@ export class MOSProxyBuilder {
             htmlRewriter: this._htmlRewriter,
             clientMetadataProvider: this._clientMetadataProvider,
             identityProvider: this._identityProvider,
+            resourceProvider: this._resourceProvider,
             logger: this._logger ?? undefined,
             onHtmlPipelineError: this._onHtmlPipelineError ?? undefined,
             customEndpointsEnabled: this._customEndpoints,

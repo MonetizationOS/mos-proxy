@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { ResourceProvider } from '../../src/adapters/ResourceProvider'
 import { normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
 import type { MOSProxyLogger } from '../../src/logger'
@@ -39,7 +40,7 @@ const anonymousCookie = (identifier: string) => `anon-session=${identifier}; Pat
 
 const run = async (pipelineCtx: PipelineContext, request: Request, apiResponse: SurfaceDecisionResponse) => {
     const apiFetcher = MockFetcher(() => new Response(JSON.stringify(apiResponse), { status: 200 }))
-    const [response] = await getSurfaceDecisions(pipelineCtx, request, htmlResponse(), apiFetcher, null, null, null)
+    const [response] = await getSurfaceDecisions(pipelineCtx, request, htmlResponse(), apiFetcher, null, null, null, null)
     return response.headers.getSetCookie()
 }
 
@@ -157,5 +158,41 @@ describe('getSurfaceDecisions identity cookies', () => {
             )
             expect(cookies).toEqual([])
         })
+    })
+})
+
+describe('getSurfaceDecisions resource provider', () => {
+    const runWithResourceProvider = async (resourceProvider: ResourceProvider | null) => {
+        const apiFetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+        await getSurfaceDecisions(
+            ctx(),
+            new Request('https://proxy.example.com/article'),
+            htmlResponse(),
+            apiFetcher,
+            null,
+            null,
+            null,
+            resourceProvider,
+        )
+        const body = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        return body.resource
+    }
+
+    it('defaults the resource to the request pathname and (empty) page metadata when no provider is set', async () => {
+        expect(await runWithResourceProvider(null)).toEqual({ id: '/article', meta: {} })
+    })
+
+    it('merges the provider fields over the derived defaults', async () => {
+        const resource = await runWithResourceProvider({
+            build: () => ({ tier: 'premium' }),
+        })
+        expect(resource).toEqual({ id: '/article', meta: {}, tier: 'premium' })
+    })
+
+    it('lets the provider override the default id and meta', async () => {
+        const resource = await runWithResourceProvider({
+            build: () => ({ id: 'canonical-id', meta: { lang: 'en' } }),
+        })
+        expect(resource).toEqual({ id: 'canonical-id', meta: { lang: 'en' } })
     })
 })
