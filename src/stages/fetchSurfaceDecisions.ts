@@ -1,11 +1,11 @@
 import type { Fetcher } from '../adapters/Fetcher'
+import type { Identity } from '../adapters/IdentityProvider'
 import { withMosProxyHeaders } from '../apiRequestHeaders'
 import type { PipelineContext } from '../context'
 import type { PageMetadata, SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
 
 export type FetchSurfaceDecisionsArgs = {
-    anonymousIdentifier?: string | undefined
-    userJwt?: string | undefined
+    identity: Identity
     path: string
     url: string
     clientMetadata: Record<string, unknown>
@@ -31,18 +31,14 @@ export type FetchSurfaceDecisionsResult =
 
 export default async function fetchSurfaceDecisions(
     ctx: PipelineContext,
-    { anonymousIdentifier, userJwt, path, url, clientMetadata, pageMetadata, userAgent, originStatus }: FetchSurfaceDecisionsArgs,
+    { identity, path, url, clientMetadata, pageMetadata, userAgent, originStatus }: FetchSurfaceDecisionsArgs,
     apiFetcher: Fetcher,
 ): Promise<FetchSurfaceDecisionsResult> {
     const { config } = ctx
     const body = JSON.stringify({
         ...clientMetadata,
         surfaceSlug: config.surfaceSlug,
-        identity: buildIdentity({
-            anonymousIdentifier,
-            userJwt,
-            createAnonymousIdentifierFallback: config.createAnonymousIdentifierFallback,
-        }),
+        identity,
         resource: {
             id: path,
             meta: pageMetadata,
@@ -111,22 +107,6 @@ export default async function fetchSurfaceDecisions(
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
-
-const buildIdentity = ({
-    anonymousIdentifier,
-    userJwt,
-    createAnonymousIdentifierFallback,
-}: Pick<FetchSurfaceDecisionsArgs, 'anonymousIdentifier' | 'userJwt'> & {
-    createAnonymousIdentifierFallback: boolean
-}) => {
-    if (!anonymousIdentifier && !userJwt) {
-        return { createAnonymousIdentifier: true }
-    }
-    if (userJwt) {
-        return createAnonymousIdentifierFallback ? { userJwt, createAnonymousIdentifierFallback: true } : { userJwt }
-    }
-    return { anonymousIdentifier }
-}
 
 const isSurfaceDecisionError = (value: unknown): value is SurfaceDecisionError =>
     isRecord(value) && value.status === 'error' && typeof value.message === 'string' && typeof value.statusCode === 'number'
