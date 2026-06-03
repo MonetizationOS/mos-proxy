@@ -1,5 +1,22 @@
 # @monetizationos/proxy
 
+## 1.4.0
+
+### Minor Changes
+
+- [#18](https://github.com/MonetizationOS/mos-proxy/pull/18) [`e5cbd90`](https://github.com/MonetizationOS/mos-proxy/commit/e5cbd909d037bc12dcbc500f4e404e573406cb53) Thanks [@benney](https://github.com/benney)! - Add `ResourceProvider` adapter for overriding the resource object sent to the
+  surface-decisions API.
+
+  Register via `MOSProxyBuilder.withResourceProvider(provider)` to supply extra
+  per-request resource fields. The proxy derives defaults (`{ id: pathname, meta:
+pageMetadata }`) and shallow-merges the provider's output over them, so return
+  only the keys you want to add or override — `id`/`meta` are preserved unless you
+  set them. Merging is shallow, matching `ClientMetadataProvider`.
+
+  New public exports: `ResourceProvider` and `Resource`.
+
+  With no provider configured, behaviour is identical to previous versions.
+
 ## 1.3.0
 
 ### Minor Changes
