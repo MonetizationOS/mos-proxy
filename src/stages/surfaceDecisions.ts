@@ -2,6 +2,7 @@ import type { ClientMetadataProvider } from '../adapters/ClientMetadataProvider'
 import type { Fetcher } from '../adapters/Fetcher'
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
 import { defaultPersistIdentity, defaultResolveIdentity, type Identity, type IdentityProvider } from '../adapters/IdentityProvider'
+import type { ResourceProvider } from '../adapters/ResourceProvider'
 import type { PipelineContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 import fetchSurfaceDecisions from './fetchSurfaceDecisions'
@@ -15,6 +16,7 @@ export default async function getSurfaceDecisions(
     rewriter: HtmlRewriterAdapter | null,
     clientMetadataProvider: ClientMetadataProvider | null,
     identityProvider: IdentityProvider | null,
+    resourceProvider: ResourceProvider | null,
 ): Promise<[Response, SurfaceDecisionResponse | null]> {
     const { config, logger } = ctx
 
@@ -38,14 +40,15 @@ export default async function getSurfaceDecisions(
 
     const clientMetadata = clientMetadataProvider?.build(request) ?? {}
 
+    const resource = { id: new URL(request.url).pathname, meta: pageMetadata, ...resourceProvider?.build(request) }
+
     const result = await fetchSurfaceDecisions(
         ctx,
         {
             identity,
-            path: new URL(request.url).pathname,
             url: request.url,
             clientMetadata,
-            pageMetadata,
+            resource,
             userAgent: request.headers.get('User-Agent') ?? undefined,
             originStatus: response.status,
         },

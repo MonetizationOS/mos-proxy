@@ -1,15 +1,15 @@
 import type { Fetcher } from '../adapters/Fetcher'
 import type { Identity } from '../adapters/IdentityProvider'
+import type { Resource } from '../adapters/ResourceProvider'
 import { withMosProxyHeaders } from '../apiRequestHeaders'
 import type { PipelineContext } from '../context'
-import type { PageMetadata, SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
+import type { SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
 
 export type FetchSurfaceDecisionsArgs = {
     identity: Identity
-    path: string
     url: string
     clientMetadata: Record<string, unknown>
-    pageMetadata?: PageMetadata
+    resource: Resource
     userAgent?: string | undefined
     originStatus: number
 }
@@ -31,7 +31,7 @@ export type FetchSurfaceDecisionsResult =
 
 export default async function fetchSurfaceDecisions(
     ctx: PipelineContext,
-    { identity, path, url, clientMetadata, pageMetadata, userAgent, originStatus }: FetchSurfaceDecisionsArgs,
+    { identity, url, clientMetadata, resource, userAgent, originStatus }: FetchSurfaceDecisionsArgs,
     apiFetcher: Fetcher,
 ): Promise<FetchSurfaceDecisionsResult> {
     const { config } = ctx
@@ -39,10 +39,7 @@ export default async function fetchSurfaceDecisions(
         ...clientMetadata,
         surfaceSlug: config.surfaceSlug,
         identity,
-        resource: {
-            id: path,
-            meta: pageMetadata,
-        },
+        resource,
         http: {
             url,
             userAgent,

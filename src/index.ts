@@ -10,6 +10,8 @@ export type {
     IdentityProvider,
     PersistIdentityArgs,
     ResolveIdentityArgs,
+    Resource,
+    ResourceProvider,
     RewriterElement,
     RewriterText,
 } from './adapters'
