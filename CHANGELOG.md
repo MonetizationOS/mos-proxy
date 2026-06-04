@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.4.1
+
+### Patch Changes
+
+- [#20](https://github.com/MonetizationOS/mos-proxy/pull/20) [`029cb36`](https://github.com/MonetizationOS/mos-proxy/commit/029cb367889e89d9d20808cc71b5732b7c47ce44) Thanks [@JFL110](https://github.com/JFL110)! - Fix identity handling for authenticated APIs
+
 ## 1.4.0
 
 ### Minor Changes
