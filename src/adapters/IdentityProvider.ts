@@ -35,10 +35,10 @@ export interface IdentityProvider {
 
 export const getExistingCookies = (
     request: Request,
-    originResponse: Response,
+    originResponse: Response | undefined,
     config: MOSConfig,
 ): { anonymousIdentifier?: string; userJwt?: string } => {
-    const setCookies = originResponse.headers.getSetCookie().map((header) => parseSetCookie(header))
+    const setCookies = originResponse?.headers.getSetCookie().map((header) => parseSetCookie(header)) || []
     const originAnonymousCookie = setCookies.find((s) => s.name === config.anonymousSessionCookieName)
     const originUserJwtCookie = setCookies.find((s) => s.name === config.authenticatedUserJwtCookieName)
     if (originAnonymousCookie || originUserJwtCookie) {
@@ -73,7 +73,7 @@ export const buildIdentity = ({
 
 export const defaultResolveIdentity = (args: ResolveIdentityArgs): Identity =>
     buildIdentity({
-        ...(args.originResponse ? getExistingCookies(args.request, args.originResponse, args.config) : {}),
+        ...getExistingCookies(args.request, args.originResponse, args.config),
         createAnonymousIdentifierFallback: args.config.createAnonymousIdentifierFallback,
     })
 
