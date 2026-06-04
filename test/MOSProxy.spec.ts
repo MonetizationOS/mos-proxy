@@ -571,17 +571,15 @@ describe('custom authenticated API routes', () => {
             .withOriginFetcher(originFetcher)
             .withHtmlRewriter(new PassthroughHtmlRewriter())
             .withClientMetadata({ build: () => ({ custom: 'metadata' }) })
-            .withIdentityProvider({
-                persist: () => {
-                    throw new Error('persist boom')
-                },
-            })
             .build()
 
         const response = await proxy.handle(
             new Request('https://proxy.example.com/mos-api/offer-redemptions', {
                 method: 'POST',
                 body: JSON.stringify({ offerToken: 'offer.abc' }),
+                headers: {
+                    cookie: 'anon-session=the-session;',
+                },
             }),
         )
 
@@ -593,7 +591,7 @@ describe('custom authenticated API routes', () => {
             {
                 custom: 'metadata',
                 http: { url: 'https://proxy.example.com/mos-api/offer-redemptions' },
-                identity: { createAnonymousIdentifier: true },
+                identity: { anonymousIdentifier: 'the-session' },
                 offerToken: 'offer.abc',
             },
             [
