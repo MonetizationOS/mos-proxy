@@ -75,6 +75,25 @@ describe('fetchSurfaceDecisions', () => {
         })
     })
 
+    it('includes Referer header in http.referer when provided', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(
+            ctx,
+            args({
+                referer: 'https://proxy.example.com/previous-page',
+            }),
+            fetcher,
+        )
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.http).toEqual({
+            url: 'https://proxy.example.com/article',
+            referer: 'https://proxy.example.com/previous-page',
+            proxyOrigin: { status: 200 },
+        })
+    })
+
     it('spreads Fastly client metadata at the top level to match the Fastly proxy shape', async () => {
         const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
 

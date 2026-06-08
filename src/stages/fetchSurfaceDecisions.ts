@@ -11,6 +11,7 @@ export type FetchSurfaceDecisionsArgs = {
     clientMetadata: Record<string, unknown>
     resource: Resource
     userAgent?: string | undefined
+    referer?: string | undefined
     originStatus: number
 }
 
@@ -31,7 +32,7 @@ export type FetchSurfaceDecisionsResult =
 
 export default async function fetchSurfaceDecisions(
     ctx: PipelineContext,
-    { identity, url, clientMetadata, resource, userAgent, originStatus }: FetchSurfaceDecisionsArgs,
+    { identity, url, clientMetadata, resource, userAgent, referer, originStatus }: FetchSurfaceDecisionsArgs,
     apiFetcher: Fetcher,
 ): Promise<FetchSurfaceDecisionsResult> {
     const { config } = ctx
@@ -43,6 +44,7 @@ export default async function fetchSurfaceDecisions(
         http: {
             url,
             userAgent,
+            referer,
             proxyOrigin: {
                 status: originStatus,
             },

@@ -50,6 +50,7 @@ export default async function getSurfaceDecisions(
             clientMetadata,
             resource,
             userAgent: request.headers.get('User-Agent') ?? undefined,
+            referer: request.headers.get('Referer') ?? undefined,
             originStatus: response.status,
         },
         apiFetcher,
