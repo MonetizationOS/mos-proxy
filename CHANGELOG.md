@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.4.2
+
+### Patch Changes
+
+- [#22](https://github.com/MonetizationOS/mos-proxy/pull/22) [`42706a0`](https://github.com/MonetizationOS/mos-proxy/commit/42706a0491177b13a100555e3ee66a693fb1a28c) Thanks [@filipe-boleto](https://github.com/filipe-boleto)! - Include Referer header in surface decisions http payload
+
 ## 1.4.1
 
 ### Patch Changes
