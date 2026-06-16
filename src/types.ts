@@ -133,6 +133,8 @@ export interface MOSConfigInput {
     injectScriptUrl?: string
     /** Comma-separated regex patterns; matching pathnames skip surface decisions. */
     surfaceDecisionsIgnorePaths?: string
+    /** Comma-separated regex patterns; matching request and origin Set-Cookie values are forwarded in the surface-decisions http payload. */
+    surfaceDecisionsCookies?: string
     /** Optional headers added to or replacing client headers on every origin request. */
     originRequestHeaders?: Record<string, string>
     /**

@@ -5,6 +5,7 @@ export type MOSProxyLogCode =
     | 'html-pipeline-error-handler-invalid'
     | 'html-pipeline-error-handler-threw'
     | 'invalid-ignore-path-pattern'
+    | 'invalid-surface-decisions-cookie-pattern'
     | 'response-clone-failed'
     | 'surface-decisions-api-failed'
     | 'identity-resolve-failed'

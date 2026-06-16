@@ -4,6 +4,7 @@ import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
 import { defaultPersistIdentity, defaultResolveIdentity, type Identity, type IdentityProvider } from '../adapters/IdentityProvider'
 import type { ResourceProvider } from '../adapters/ResourceProvider'
 import type { PipelineContext } from '../context'
+import { selectSurfaceDecisionCookies } from '../surfaceDecisionCookies'
 import type { SurfaceDecisionResponse } from '../types'
 import fetchSurfaceDecisions from './fetchSurfaceDecisions'
 import { parsePageMetadata } from './pageMetadata'
@@ -51,6 +52,7 @@ export default async function getSurfaceDecisions(
             resource,
             userAgent: request.headers.get('User-Agent') ?? undefined,
             referer: request.headers.get('Referer') ?? undefined,
+            cookies: selectSurfaceDecisionCookies(request.headers.get('Cookie'), response, config.surfaceDecisionsCookiePatterns),
             originStatus: response.status,
         },
         apiFetcher,

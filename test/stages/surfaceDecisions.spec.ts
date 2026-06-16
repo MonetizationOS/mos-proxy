@@ -196,3 +196,164 @@ describe('getSurfaceDecisions resource provider', () => {
         expect(resource).toEqual({ id: 'canonical-id', meta: { lang: 'en' } })
     })
 })
+
+describe('getSurfaceDecisions request cookies', () => {
+    it('forwards matching request cookies in the surface-decisions http payload', async () => {
+        const apiFetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+        const pipelineCtx: PipelineContext = {
+            config: normalizeMOSConfig(
+                {
+                    ...baseConfigInput,
+                    surfaceDecisionsCookies: '^__session$, ^theme$',
+                },
+                silentLogger,
+            ),
+            logger: silentLogger,
+        }
+
+        await getSurfaceDecisions(
+            pipelineCtx,
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: '__session=jwt-token; theme=dark; ignored=1' },
+            }),
+            htmlResponse(),
+            apiFetcher,
+            null,
+            null,
+            null,
+            null,
+        )
+
+        const body = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(body.http.cookies).toEqual({
+            __session: 'jwt-token',
+            theme: 'dark',
+        })
+    })
+
+    it('forwards matching origin Set-Cookie values when the request has no Cookie header', async () => {
+        const apiFetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+        const pipelineCtx: PipelineContext = {
+            config: normalizeMOSConfig(
+                {
+                    ...baseConfigInput,
+                    surfaceDecisionsCookies: '^theme$',
+                },
+                silentLogger,
+            ),
+            logger: silentLogger,
+        }
+
+        await getSurfaceDecisions(
+            pipelineCtx,
+            new Request('https://proxy.example.com/article'),
+            new Response('<p/>', {
+                status: 200,
+                headers: {
+                    'Content-Type': 'text/html; charset=utf-8',
+                    'Set-Cookie': 'theme=dark; Path=/',
+                },
+            }),
+            apiFetcher,
+            null,
+            null,
+            null,
+            null,
+        )
+
+        const body = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(body.http.cookies).toEqual({
+            theme: 'dark',
+        })
+    })
+
+    it('forwards matching origin Set-Cookie values on a client request that also sends cookies', async () => {
+        const apiFetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+        const pipelineCtx: PipelineContext = {
+            config: normalizeMOSConfig(
+                {
+                    ...baseConfigInput,
+                    surfaceDecisionsCookies: '^__session$, ^theme$',
+                },
+                silentLogger,
+            ),
+            logger: silentLogger,
+        }
+        const originResponse = new Response('<p/>', {
+            status: 200,
+            headers: new Headers([
+                ['Content-Type', 'text/html; charset=utf-8'],
+                ['Set-Cookie', 'theme=from-origin; Path=/'],
+            ]),
+        })
+
+        await getSurfaceDecisions(
+            pipelineCtx,
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: '__session=from-request; theme=old; ignored=1' },
+            }),
+            originResponse,
+            apiFetcher,
+            null,
+            null,
+            null,
+            null,
+        )
+
+        const body = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(body.http.cookies).toEqual({
+            __session: 'from-request',
+            theme: 'from-origin',
+        })
+    })
+
+    it('omits http.cookies when no patterns are configured', async () => {
+        const apiFetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await getSurfaceDecisions(
+            ctx(),
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: '__session=jwt-token' },
+            }),
+            htmlResponse(),
+            apiFetcher,
+            null,
+            null,
+            null,
+            null,
+        )
+
+        const body = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(body.http.cookies).toBeUndefined()
+    })
+
+    it('omits http.cookies when patterns are configured but none match', async () => {
+        const apiFetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+        const pipelineCtx: PipelineContext = {
+            config: normalizeMOSConfig(
+                {
+                    ...baseConfigInput,
+                    surfaceDecisionsCookies: '^__session$',
+                },
+                silentLogger,
+            ),
+            logger: silentLogger,
+        }
+
+        await getSurfaceDecisions(
+            pipelineCtx,
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: 'other=1' },
+            }),
+            htmlResponse(),
+            apiFetcher,
+            null,
+            null,
+            null,
+            null,
+        )
+
+        const body = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(body.http.cookies).toBeUndefined()
+    })
+})

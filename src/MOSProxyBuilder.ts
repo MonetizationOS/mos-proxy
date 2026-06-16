@@ -30,6 +30,8 @@ import type { MOSConfigInput, MosAuthenticatedApiRoute } from './types'
  *         authenticatedUserJwtCookieName: '__session',
  *         injectScriptUrl: 'https://assets.monetizationos.com/web-components-latest.js',
  *         surfaceDecisionsIgnorePaths: '',
+ *         // Optional: forward specific cookies to surface decisions
+ *         surfaceDecisionsCookies: '^__session$, ^theme$',
  *         originRequestHeaders: { 'X-Api-Key': process.env.ORIGIN_API_KEY! },
  *         createAnonymousIdentifierFallback: true,
  *     })

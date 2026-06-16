@@ -52,6 +52,30 @@ export default {
 
 Stages 3–6 run on HTML responses only and auto-skip for everything else. Call `.withoutHtmlTransformation()` to disable them entirely.
 
+## Configuration
+
+Optional fields on `MOSConfigInput`:
+
+| Field | Description |
+| --- | --- |
+| `mosEndpointsPrefix` | Path prefix routed to the MonetizationOS endpoint proxy. Default: `/mos-endpoints/`. |
+| `surfaceDecisionsIgnorePaths` | Comma-separated regex patterns. Matching request pathnames skip the surface-decisions call. |
+| `surfaceDecisionsCookies` | Comma-separated regex patterns. Matching cookies from the incoming request and the origin `Set-Cookie` headers are forwarded to the surface-decisions API as `http.cookies` (`Record<string, string>`). Origin values win when the same name appears in both. Omitted when unset or when no cookies match. |
+| `createAnonymousIdentifierFallback` | When `true` (default), JWT surface-decision requests ask MonetizationOS to mint an anonymous identifier if JWT auth fails. |
+| `originRequestHeaders` | Headers added to or replacing client headers on every origin request. |
+| `injectScriptUrl` | Script URL injected into the `<head>` of HTML responses. |
+
+Example — forward specific cookies to surface decisions:
+
+```ts
+.withConfig({
+    // ...
+    surfaceDecisionsCookies: "^__session$, ^theme$, ^mos_",
+})
+```
+
+Each entry is a regex tested against the cookie **name**. Plain names like `^__session$` match exactly; prefixes like `^mos_` match any cookie whose name starts with `mos_`.
+
 ## Adapters
 
 - `Fetcher` — `(request: Request) => Promise<Response>`. Configure separately for origin traffic (`.withOriginFetcher`) and MOS API traffic (`.withApiFetcher`). Both default to `globalThis.fetch`; override on runtimes that need a backend binding (e.g. Fastly Compute) or custom dispatch.
