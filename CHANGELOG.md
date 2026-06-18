@@ -1,5 +1,13 @@
 # @monetizationos/proxy
 
+## 1.4.3
+
+### Patch Changes
+
+- [#24](https://github.com/MonetizationOS/mos-proxy/pull/24) [`4f85379`](https://github.com/MonetizationOS/mos-proxy/commit/4f85379558014fd696856f0039d6b81c3df65799) Thanks [@filipe-boleto](https://github.com/filipe-boleto)! - Add `surfaceDecisionsCookies` config to forward selected request cookies in the surface-decisions `http` payload.
+
+  Configure comma-separated regex patterns (same style as `surfaceDecisionsIgnorePaths`) to match cookie names. Matching cookies from the incoming `Cookie` header and the origin `Set-Cookie` headers are sent as `http.cookies`. Origin values win when the same name appears in both. When unset or when no cookies match, `http.cookies` is omitted.
+
 ## 1.4.2
 
 ### Patch Changes
