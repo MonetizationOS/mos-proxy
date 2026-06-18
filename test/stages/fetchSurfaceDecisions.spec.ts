@@ -94,6 +94,34 @@ describe('fetchSurfaceDecisions', () => {
         })
     })
 
+    it('includes cookies in http.cookies when provided', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(
+            ctx,
+            args({
+                cookies: { __session: 'jwt-token', theme: 'dark' },
+            }),
+            fetcher,
+        )
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.http).toEqual({
+            url: 'https://proxy.example.com/article',
+            cookies: { __session: 'jwt-token', theme: 'dark' },
+            proxyOrigin: { status: 200 },
+        })
+    })
+
+    it('omits http.cookies when not provided', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(ctx, args(), fetcher)
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.http.cookies).toBeUndefined()
+    })
+
     it('spreads Fastly client metadata at the top level to match the Fastly proxy shape', async () => {
         const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
 
