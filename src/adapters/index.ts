@@ -1,4 +1,10 @@
 export type { ClientMetadataProvider } from './ClientMetadataProvider'
+export type {
+    ConfigFactory,
+    UnresolvedConfigContext,
+    UnresolvedConfigHandler,
+    UnresolvedConfigReason,
+} from './ConfigFactory'
 export type { Fetcher } from './Fetcher'
 export type {
     ContentOptions,

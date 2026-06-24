@@ -1,4 +1,5 @@
 import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
+import type { ConfigFactory, UnresolvedConfigHandler } from './adapters/ConfigFactory'
 import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
 import type { IdentityProvider } from './adapters/IdentityProvider'
@@ -42,13 +43,15 @@ import type { MOSConfigInput, MosAuthenticatedApiRoute } from './types'
  * ```
  */
 export class MOSProxyBuilder {
-    private _config: MOSConfigInput | null = null
+    private _config: MOSConfigInput | ConfigFactory | null = null
     private _originFetcher: Fetcher = globalThis.fetch
     private _apiFetcher: Fetcher = globalThis.fetch
     private _htmlRewriter: HtmlRewriterAdapter | null = null
     private _clientMetadataProvider: ClientMetadataProvider | null = null
     private _identityProvider: IdentityProvider | null = null
     private _resourceProvider: ResourceProvider | null = null
+    private _onUnresolvedConfig: UnresolvedConfigHandler | null = null
+    private _configCacheSize: number | null = null
     private _logger: MOSProxyLogger | null = null
     private _onHtmlPipelineError: MOSProxyHtmlPipelineErrorHandler | null = null
     private _customEndpoints = true
@@ -57,7 +60,14 @@ export class MOSProxyBuilder {
     private _htmlTransformation = true
     private _additionalAuthenticatedApiRoutes: MosAuthenticatedApiRoute[] = []
 
-    withConfig(config: MOSConfigInput): this {
+    /**
+     * Sets the proxy configuration. Pass a {@link MOSConfigInput} for one fixed config, or a
+     * {@link ConfigFactory} to compute a full config per request so one deployment can front several
+     * brands. A factory returns the complete config (you merge shared fields with per-brand values
+     * yourself). See {@link hostPathMatcher} for a ready-made host/path table, and
+     * {@link withUnresolvedConfigHandler} for requests it can't resolve.
+     */
+    withConfig(config: MOSConfigInput | ConfigFactory): this {
         this._config = config
         return this
     }
@@ -102,6 +112,26 @@ export class MOSProxyBuilder {
      */
     withResourceProvider(provider: ResourceProvider): this {
         this._resourceProvider = provider
+        return this
+    }
+
+    /**
+     * Handles requests a {@link ConfigFactory} couldn't resolve (it threw or returned a config that
+     * wouldn't normalize). Return a `Response` to fail closed (e.g. a 404 for an unknown host), or
+     * return nothing to fall through to that host's last-known-good config. With no handler and no
+     * last-known-good config for the host, the error propagates instead of serving another brand's config.
+     */
+    withUnresolvedConfigHandler(handler: UnresolvedConfigHandler): this {
+        this._onUnresolvedConfig = handler
+        return this
+    }
+
+    /**
+     * Max number of normalized configs to keep in memory. Defaults to 256; raise it above your
+     * live brand count if a deployment fronts more than that.
+     */
+    withConfigCacheSize(max: number): this {
+        this._configCacheSize = max
         return this
     }
 
@@ -178,6 +208,8 @@ export class MOSProxyBuilder {
             clientMetadataProvider: this._clientMetadataProvider,
             identityProvider: this._identityProvider,
             resourceProvider: this._resourceProvider,
+            onUnresolvedConfig: this._onUnresolvedConfig ?? undefined,
+            maxCachedConfigs: this._configCacheSize ?? undefined,
             logger: this._logger ?? undefined,
             onHtmlPipelineError: this._onHtmlPipelineError ?? undefined,
             customEndpointsEnabled: this._customEndpoints,
