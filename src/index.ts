@@ -1,5 +1,6 @@
 export type {
     ClientMetadataProvider,
+    ConfigFactory,
     ContentOptions,
     ElementHandlers,
     Fetcher,
@@ -14,6 +15,9 @@ export type {
     ResourceProvider,
     RewriterElement,
     RewriterText,
+    UnresolvedConfigContext,
+    UnresolvedConfigHandler,
+    UnresolvedConfigReason,
 } from './adapters'
 export {
     buildIdentity,
@@ -22,6 +26,8 @@ export {
     getExistingCookies,
 } from './adapters'
 export type { MOSConfig } from './config'
+export { ConfigUnresolvableError } from './configResolution'
+export { type HostPathRule, hostPathMatcher } from './hostPathMatcher'
 export type { MOSProxyLogCode, MOSProxyLogEvent, MOSProxyLogger, MOSProxyLogLevel } from './logger'
 export {
     MOSProxy,

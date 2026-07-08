@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ElementHandlers, HtmlRewriterAdapter, HtmlRewriterCapabilities, HtmlRewriterSession } from '../src/adapters'
 import { MOSProxyBuilder } from '../src/index'
-import type { MOSProxyLogEvent } from '../src/logger'
 import type { MOSConfigInput, SurfaceDecisionResponse } from '../src/types'
+import { createMemoryLogger } from './fakes/MemoryLogger'
 import { MockFetcher } from './fakes/MockFetcher'
 import { PassthroughHtmlRewriter } from './fakes/PassthroughHtmlRewriter'
 
@@ -33,18 +33,6 @@ const decisionsResponse = (overrides: Partial<SurfaceDecisionResponse> = {}): Re
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
-
-const createMemoryLogger = () => {
-    const events: MOSProxyLogEvent[] = []
-    return {
-        events,
-        logger: {
-            log(event: MOSProxyLogEvent) {
-                events.push(event)
-            },
-        },
-    }
-}
 
 class TransformSequenceHtmlRewriter implements HtmlRewriterAdapter {
     readonly capabilities: HtmlRewriterCapabilities = { onEndTag: true, nthChild: true }

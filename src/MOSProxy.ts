@@ -1,9 +1,10 @@
 import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
+import type { ConfigFactory, UnresolvedConfigHandler } from './adapters/ConfigFactory'
 import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
 import type { IdentityProvider } from './adapters/IdentityProvider'
 import type { ResourceProvider } from './adapters/ResourceProvider'
-import { type MOSConfig, normalizeMOSConfig } from './config'
+import { ConfigResolution } from './configResolution'
 import type { PipelineContext } from './context'
 import { consoleLogger, type MOSProxyLogger } from './logger'
 import customEndpointRequest from './stages/customEndpoint'
@@ -41,13 +42,17 @@ export interface MOSProxyHtmlPipelineErrorContext {
 export type MOSProxyHtmlPipelineErrorHandler = (ctx: MOSProxyHtmlPipelineErrorContext) => Response | Promise<Response>
 
 export interface MOSProxyOptions {
-    config: MOSConfigInput
+    /** A static config, or a per-request {@link ConfigFactory}. */
+    config: MOSConfigInput | ConfigFactory
     originFetcher: Fetcher
     apiFetcher: Fetcher | null
     htmlRewriter: HtmlRewriterAdapter | null
     clientMetadataProvider: ClientMetadataProvider | null
     identityProvider: IdentityProvider | null
     resourceProvider: ResourceProvider | null
+    onUnresolvedConfig?: UnresolvedConfigHandler | null
+    /** Max number of distinct resolved configs to keep normalized in memory. Default 256. */
+    maxCachedConfigs?: number
     logger?: MOSProxyLogger
     onHtmlPipelineError?: MOSProxyHtmlPipelineErrorHandler
     customEndpointsEnabled: boolean
@@ -57,22 +62,36 @@ export interface MOSProxyOptions {
     mosAuthenticatedApiRoutes?: MosAuthenticatedApiRoute[]
 }
 
+const DEFAULT_MAX_CACHED_CONFIGS = 256
+
 /**
  * Platform-agnostic MonetizationOS proxy. Build one with `MOSProxyBuilder`, then call
  * `proxy.handle(request)` from your platform's fetch entry point.
  */
 export class MOSProxy {
-    private readonly config: MOSConfig
+    private readonly logger: MOSProxyLogger
+    private readonly configResolution: ConfigResolution
 
     constructor(private readonly opts: MOSProxyOptions) {
-        this.config = normalizeMOSConfig(opts.config, opts.logger ?? consoleLogger)
+        this.logger = opts.logger ?? consoleLogger
+        this.configResolution = new ConfigResolution({
+            input: opts.config,
+            onUnresolved: opts.onUnresolvedConfig ?? null,
+            maxCachedConfigs: opts.maxCachedConfigs ?? DEFAULT_MAX_CACHED_CONFIGS,
+            logger: this.logger,
+        })
     }
 
     async handle(request: Request): Promise<Response> {
         const { originFetcher, apiFetcher, htmlRewriter, clientMetadataProvider, identityProvider, resourceProvider, onHtmlPipelineError } =
             this.opts
-        const logger = this.opts.logger ?? consoleLogger
-        const ctx: PipelineContext = { config: this.config, logger }
+        const logger = this.logger
+
+        const resolved = await this.configResolution.resolve(request)
+        if (resolved instanceof Response) {
+            return resolved
+        }
+        const ctx: PipelineContext = { config: resolved, logger }
 
         // Stage 1a: custom endpoint routing
         if (this.opts.customEndpointsEnabled) {

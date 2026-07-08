@@ -76,6 +76,42 @@ Example — forward specific cookies to surface decisions:
 
 Each entry is a regex tested against the cookie **name**. Plain names like `^__session$` match exactly; prefixes like `^mos_` match any cookie whose name starts with `mos_`.
 
+## Per-request config
+
+`.withConfig(...)` also accepts a `ConfigFactory` — `(request: Request) => MOSConfigInput | Promise<MOSConfigInput>` — so one deployment can front several brands. The factory returns the complete config for each request; look it up however you like (KV, env JSON, a host table). `hostPathMatcher` is a ready-made factory that picks a rule by host and path prefix and shallow-merges its config over a shared base:
+
+```ts
+import { MOSProxyBuilder, hostPathMatcher, type MOSConfigInput } from "@monetizationos/proxy";
+
+const base = {
+    mosHost: "https://api.monetizationos.com",
+    mosSecretKey: process.env.MONETIZATION_OS_SECRET_KEY!,
+    anonymousSessionCookieName: "anon-session-id",
+    authenticatedUserJwtCookieName: "__session",
+} satisfies Partial<MOSConfigInput>;
+
+const proxy = new MOSProxyBuilder()
+    .withConfig(
+        hostPathMatcher(
+            [
+                {
+                    host: "news.example.com",
+                    config: { originUrl: "https://origin.news.example.com", surfaceSlug: "news-web" },
+                },
+                {
+                    host: "news.example.com",
+                    pathPrefix: "/sports",
+                    config: { originUrl: "https://origin.sports.example.com", surfaceSlug: "sports-web" },
+                },
+            ],
+            base,
+        ),
+    )
+    .withUnresolvedConfigHandler(() => new Response("Not found", { status: 404 }))
+    .withHtmlRewriter(myHtmlRewriterAdapter)
+    .build();
+```
+
 ## Adapters
 
 - `Fetcher` — `(request: Request) => Promise<Response>`. Configure separately for origin traffic (`.withOriginFetcher`) and MOS API traffic (`.withApiFetcher`). Both default to `globalThis.fetch`; override on runtimes that need a backend binding (e.g. Fastly Compute) or custom dispatch.
