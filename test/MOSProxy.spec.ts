@@ -591,6 +591,40 @@ describe('custom authenticated API routes', () => {
         )
     })
 
+    it('includes Referer header in offer redemption http.referer when provided', async () => {
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withApiFetcher(apiFetcher)
+            .withOriginFetcher(originFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .build()
+
+        await proxy.handle(
+            new Request('https://proxy.example.com/mos-api/offer-redemptions', {
+                method: 'POST',
+                body: JSON.stringify({ offerToken: 'offer.abc' }),
+                headers: {
+                    cookie: 'anon-session=the-session;',
+                    Referer: 'https://proxy.example.com/article/tombstone',
+                },
+            }),
+        )
+
+        expect(requestCaptor).toHaveBeenCalledExactlyOnceWith(
+            'https://api.monetizationos.com/api/v1/offer-redemptions',
+            'POST',
+            {
+                http: {
+                    url: 'https://proxy.example.com/mos-api/offer-redemptions',
+                    referer: 'https://proxy.example.com/article/tombstone',
+                },
+                identity: { anonymousIdentifier: 'the-session' },
+                offerToken: 'offer.abc',
+            },
+            expect.any(Array),
+        )
+    })
+
     it('requires method to match', async () => {
         const proxy = new MOSProxyBuilder()
             .withConfig(baseConfig)
