@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.5.1
+
+### Patch Changes
+
+- [#28](https://github.com/MonetizationOS/mos-proxy/pull/28) [`0e51435`](https://github.com/MonetizationOS/mos-proxy/commit/0e514356c611114f48abacb3c95529b7cb1a5eea) Thanks [@filipe-boleto](https://github.com/filipe-boleto)! - Include Referer header in authenticated API (`/mos-api/*`) http payload, matching surface-decisions behavior since 1.4.2.
+
 ## 1.5.0
 
 ### Minor Changes
