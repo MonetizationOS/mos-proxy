@@ -48,7 +48,11 @@ const handleMosAuthenticatedApiRoute = async (
                 ...requestBody,
                 ...(clientMetadataProvider?.build(request) ?? {}),
                 identity,
-                http: { url: request.url, userAgent: request.headers.get('User-Agent') ?? undefined },
+                http: {
+                    url: request.url,
+                    userAgent: request.headers.get('User-Agent') ?? undefined,
+                    referer: request.headers.get('Referer') ?? undefined,
+                },
             }),
             headers: withMosProxyHeaders({
                 'Content-Type': 'application/json',
