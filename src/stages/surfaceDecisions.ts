@@ -1,3 +1,5 @@
+import type { ClientIPProvider } from '../adapters/ClientIPProvider'
+import { normalizeClientIP } from '../adapters/ClientIPProvider'
 import type { ClientMetadataProvider } from '../adapters/ClientMetadataProvider'
 import type { Fetcher } from '../adapters/Fetcher'
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
@@ -16,6 +18,7 @@ export default async function getSurfaceDecisions(
     apiFetcher: Fetcher,
     rewriter: HtmlRewriterAdapter | null,
     clientMetadataProvider: ClientMetadataProvider | null,
+    clientIpProvider: ClientIPProvider | null,
     identityProvider: IdentityProvider | null,
     resourceProvider: ResourceProvider | null,
 ): Promise<[Response, SurfaceDecisionResponse | null]> {
@@ -51,6 +54,7 @@ export default async function getSurfaceDecisions(
             clientMetadata,
             resource,
             userAgent: request.headers.get('User-Agent') ?? undefined,
+            clientIP: normalizeClientIP(clientIpProvider?.(request)),
             referer: request.headers.get('Referer') ?? undefined,
             cookies: selectSurfaceDecisionCookies(request.headers.get('Cookie'), response, config.surfaceDecisionsCookiePatterns),
             originStatus: response.status,

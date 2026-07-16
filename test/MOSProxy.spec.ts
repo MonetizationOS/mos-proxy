@@ -258,6 +258,52 @@ describe('MOSProxy pipeline', () => {
         expect(payload.cloudflare).toBeUndefined()
     })
 
+    it('forwards client IP from withClientIP as http.clientIP in surface decisions', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        const apiFetcher = MockFetcher(() => decisionsResponse())
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withClientMetadata({ build: () => ({ cloudflare: { cf: { country: 'GB' } } }) })
+            .withClientIP((request) => request.headers.get('CF-Connecting-IP'))
+            .build()
+
+        await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { 'CF-Connecting-IP': '203.0.113.42' },
+            }),
+        )
+
+        const payload = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(payload.http.clientIP).toBe('203.0.113.42')
+        expect(payload.cloudflare).toEqual({ cf: { country: 'GB' } })
+    })
+
+    it('omits http.clientIP when withClientIP is not configured', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p/>', { status: 200 }))
+        const apiFetcher = MockFetcher(() => decisionsResponse())
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withClientMetadata({ build: () => ({ fastly: { client: { address: '198.51.100.10' } } }) })
+            .build()
+
+        await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { 'CF-Connecting-IP': '203.0.113.42' },
+            }),
+        )
+
+        const payload = JSON.parse(await apiFetcher.calls[0]!.request.clone().text())
+        expect(payload.http.clientIP).toBeUndefined()
+    })
+
     it('fails open for surface decisions API failures and returns the rewritten response', async () => {
         const { events, logger } = createMemoryLogger()
         const originFetcher = MockFetcher(() => htmlResponse('<a href="https://origin.example.com/other">x</a>', { status: 200 }))
@@ -617,6 +663,43 @@ describe('custom authenticated API routes', () => {
                 http: {
                     url: 'https://proxy.example.com/mos-api/offer-redemptions',
                     referer: 'https://proxy.example.com/article/tombstone',
+                },
+                identity: { anonymousIdentifier: 'the-session' },
+                offerToken: 'offer.abc',
+            },
+            expect.any(Array),
+        )
+    })
+
+    it('forwards client IP from withClientIP as http.clientIP for offer redemption', async () => {
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withApiFetcher(apiFetcher)
+            .withOriginFetcher(originFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withClientMetadata({ build: () => ({ cloudflare: { cf: { country: 'GB' } } }) })
+            .withClientIP((request) => request.headers.get('CF-Connecting-IP'))
+            .build()
+
+        await proxy.handle(
+            new Request('https://proxy.example.com/mos-api/offer-redemptions', {
+                method: 'POST',
+                body: JSON.stringify({ offerToken: 'offer.abc' }),
+                headers: {
+                    cookie: 'anon-session=the-session;',
+                    'CF-Connecting-IP': '203.0.113.42',
+                },
+            }),
+        )
+
+        expect(requestCaptor).toHaveBeenCalledExactlyOnceWith(
+            'https://api.monetizationos.com/api/v1/offer-redemptions',
+            'POST',
+            {
+                cloudflare: { cf: { country: 'GB' } },
+                http: {
+                    url: 'https://proxy.example.com/mos-api/offer-redemptions',
+                    clientIP: '203.0.113.42',
                 },
                 identity: { anonymousIdentifier: 'the-session' },
                 offerToken: 'offer.abc',

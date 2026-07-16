@@ -1,4 +1,5 @@
 export type {
+    ClientIPProvider,
     ClientMetadataProvider,
     ConfigFactory,
     ContentOptions,

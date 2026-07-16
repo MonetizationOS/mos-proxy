@@ -1,3 +1,4 @@
+import type { ClientIPProvider } from './adapters/ClientIPProvider'
 import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
 import type { ConfigFactory, UnresolvedConfigHandler } from './adapters/ConfigFactory'
 import type { Fetcher } from './adapters/Fetcher'
@@ -48,6 +49,7 @@ export class MOSProxyBuilder {
     private _apiFetcher: Fetcher = globalThis.fetch
     private _htmlRewriter: HtmlRewriterAdapter | null = null
     private _clientMetadataProvider: ClientMetadataProvider | null = null
+    private _clientIpProvider: ClientIPProvider | null = null
     private _identityProvider: IdentityProvider | null = null
     private _resourceProvider: ResourceProvider | null = null
     private _onUnresolvedConfig: UnresolvedConfigHandler | null = null
@@ -89,6 +91,15 @@ export class MOSProxyBuilder {
 
     withClientMetadata(provider: ClientMetadataProvider): this {
         this._clientMetadataProvider = provider
+        return this
+    }
+
+    /**
+     * Supplies the end-user client IP for MOS API requests as `http.clientIP`.
+     * Each CDN runtime knows how to read the visitor IP from its own request object.
+     */
+    withClientIP(provider: ClientIPProvider): this {
+        this._clientIpProvider = provider
         return this
     }
 
@@ -206,6 +217,7 @@ export class MOSProxyBuilder {
             apiFetcher: this._apiFetcher,
             htmlRewriter: this._htmlRewriter,
             clientMetadataProvider: this._clientMetadataProvider,
+            clientIpProvider: this._clientIpProvider,
             identityProvider: this._identityProvider,
             resourceProvider: this._resourceProvider,
             onUnresolvedConfig: this._onUnresolvedConfig ?? undefined,

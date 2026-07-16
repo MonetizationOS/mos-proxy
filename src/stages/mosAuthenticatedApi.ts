@@ -1,4 +1,11 @@
-import { type ClientMetadataProvider, defaultResolveIdentity, type Fetcher, type IdentityProvider } from '../adapters'
+import {
+    type ClientIPProvider,
+    type ClientMetadataProvider,
+    defaultResolveIdentity,
+    type Fetcher,
+    type IdentityProvider,
+} from '../adapters'
+import { normalizeClientIP } from '../adapters/ClientIPProvider'
 import { withMosProxyHeaders } from '../apiRequestHeaders'
 import type { PipelineContext } from '../context'
 import type { MosAuthenticatedApiRoute } from '../types'
@@ -9,6 +16,7 @@ export const handleMosAuthenticatedApiRoutes = async (
     ctx: PipelineContext,
     identityProvider: IdentityProvider | null,
     clientMetadataProvider: ClientMetadataProvider | null,
+    clientIpProvider: ClientIPProvider | null,
     apiFetcher: Fetcher | null,
 ): Promise<Response | null> => {
     if (!routes?.length) {
@@ -18,7 +26,15 @@ export const handleMosAuthenticatedApiRoutes = async (
     const url = new URL(request.url)
     for (const route of routes) {
         if (url.pathname === route.matchPath && request.method.toUpperCase() === route.method) {
-            return handleMosAuthenticatedApiRoute(request, route, ctx, identityProvider, clientMetadataProvider, apiFetcher)
+            return handleMosAuthenticatedApiRoute(
+                request,
+                route,
+                ctx,
+                identityProvider,
+                clientMetadataProvider,
+                clientIpProvider,
+                apiFetcher,
+            )
         }
     }
 
@@ -31,6 +47,7 @@ const handleMosAuthenticatedApiRoute = async (
     ctx: PipelineContext,
     identityProvider: IdentityProvider | null,
     clientMetadataProvider: ClientMetadataProvider | null,
+    clientIpProvider: ClientIPProvider | null,
     apiFetcher: Fetcher | null,
 ): Promise<Response | null> => {
     if (!apiFetcher) {
@@ -40,17 +57,19 @@ const handleMosAuthenticatedApiRoute = async (
     const { config, logger } = ctx
     const requestBody = await request.json()
     const identity = await (identityProvider?.resolve ?? defaultResolveIdentity)({ request, config, logger })
+    const clientMetadata = clientMetadataProvider?.build(request) ?? {}
 
     return await apiFetcher(
         new Request(new URL(route.mosPath, config.mosHost), {
             method: route.method,
             body: JSON.stringify({
                 ...requestBody,
-                ...(clientMetadataProvider?.build(request) ?? {}),
+                ...clientMetadata,
                 identity,
                 http: {
                     url: request.url,
                     userAgent: request.headers.get('User-Agent') ?? undefined,
+                    clientIP: normalizeClientIP(clientIpProvider?.(request)),
                     referer: request.headers.get('Referer') ?? undefined,
                 },
             }),
