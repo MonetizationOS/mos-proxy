@@ -94,6 +94,34 @@ describe('fetchSurfaceDecisions', () => {
         })
     })
 
+    it('includes clientIP in http.clientIP when provided', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(
+            ctx,
+            args({
+                clientIP: '203.0.113.42',
+            }),
+            fetcher,
+        )
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.http).toEqual({
+            url: 'https://proxy.example.com/article',
+            clientIP: '203.0.113.42',
+            proxyOrigin: { status: 200 },
+        })
+    })
+
+    it('omits http.clientIP when not provided', async () => {
+        const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
+
+        await fetchSurfaceDecisions(ctx, args(), fetcher)
+
+        const body = JSON.parse(await fetcher.calls[0]!.request.clone().text())
+        expect(body.http.clientIP).toBeUndefined()
+    })
+
     it('includes cookies in http.cookies when provided', async () => {
         const fetcher = MockFetcher(() => new Response(JSON.stringify(successPayload()), { status: 200 }))
 

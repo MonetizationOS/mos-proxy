@@ -1,3 +1,4 @@
+import type { ClientIPProvider } from './adapters/ClientIPProvider'
 import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
 import type { ConfigFactory, UnresolvedConfigHandler } from './adapters/ConfigFactory'
 import type { Fetcher } from './adapters/Fetcher'
@@ -48,6 +49,7 @@ export interface MOSProxyOptions {
     apiFetcher: Fetcher | null
     htmlRewriter: HtmlRewriterAdapter | null
     clientMetadataProvider: ClientMetadataProvider | null
+    clientIpProvider: ClientIPProvider | null
     identityProvider: IdentityProvider | null
     resourceProvider: ResourceProvider | null
     onUnresolvedConfig?: UnresolvedConfigHandler | null
@@ -83,8 +85,16 @@ export class MOSProxy {
     }
 
     async handle(request: Request): Promise<Response> {
-        const { originFetcher, apiFetcher, htmlRewriter, clientMetadataProvider, identityProvider, resourceProvider, onHtmlPipelineError } =
-            this.opts
+        const {
+            originFetcher,
+            apiFetcher,
+            htmlRewriter,
+            clientMetadataProvider,
+            clientIpProvider,
+            identityProvider,
+            resourceProvider,
+            onHtmlPipelineError,
+        } = this.opts
         const logger = this.logger
 
         const resolved = await this.configResolution.resolve(request)
@@ -111,6 +121,7 @@ export class MOSProxy {
             ctx,
             identityProvider,
             clientMetadataProvider,
+            clientIpProvider,
             apiFetcher,
         )
         if (authenticatedApiResult) {
@@ -158,6 +169,7 @@ export class MOSProxy {
                 apiFetcher,
                 htmlRewriter,
                 clientMetadataProvider,
+                clientIpProvider,
                 identityProvider,
                 resourceProvider,
             )

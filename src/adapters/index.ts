@@ -1,3 +1,5 @@
+export type { ClientIPProvider } from './ClientIPProvider'
+export { normalizeClientIP } from './ClientIPProvider'
 export type { ClientMetadataProvider } from './ClientMetadataProvider'
 export type {
     ConfigFactory,
