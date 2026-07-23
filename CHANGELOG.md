@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.5.2
+
+### Patch Changes
+
+- [#30](https://github.com/MonetizationOS/mos-proxy/pull/30) [`9a48c30`](https://github.com/MonetizationOS/mos-proxy/commit/9a48c302d3f6a0a6f70f7b0023666cd8e5166597) Thanks [@filipe-boleto](https://github.com/filipe-boleto)! - Add `MOSProxyBuilder.withClientIP((request) => ...)` so each CDN runtime supplies the end-user IP for MOS API requests as `http.clientIP`. Applies to surface-decisions and authenticated `/mos-api/*` routes.
+
 ## 1.5.1
 
 ### Patch Changes
