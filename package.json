@@ -31,7 +31,8 @@
         "access": "public"
     },
     "scripts": {
-        "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+        "clean": "rm -rf dist",
+        "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
         "test": "vitest",
         "test:run": "vitest run",
         "typecheck": "tsc --noEmit",
