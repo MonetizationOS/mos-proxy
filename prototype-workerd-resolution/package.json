@@ -1,0 +1,9 @@
+{
+    "name": "prototype-workerd-resolution",
+    "private": true,
+    "type": "module",
+    "dependencies": {
+        "@monetizationos/proxy": "file:./mos-proxy.tgz",
+        "wrangler": "latest"
+    }
+}

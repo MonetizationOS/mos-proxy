@@ -7,21 +7,18 @@ REPO="$(cd "$HERE/.." && pwd)"
 PORT="${PORT:-8787}"
 cd "$HERE"
 
+# package.json pins the tarball at a fixed name, so pack to that name rather than the versioned one.
 echo "=== packing the working tree"
 rm -f ./*.tgz
 (cd "$REPO" && pnpm pack --pack-destination "$HERE" >/dev/null)
-TARBALL="$(ls ./*.tgz)"
-echo "packed $TARBALL"
+mv ./monetizationos-proxy-*.tgz ./mos-proxy.tgz
+echo "packed mos-proxy.tgz"
 
-echo "=== installing wrangler and the tarball (npm, to match a published consumer)"
-cat > package.json <<'JSON'
-{
-  "name": "prototype-workerd-resolution",
-  "private": true,
-  "type": "module"
-}
-JSON
-npm install wrangler "$TARBALL" --no-audit --no-fund --loglevel=error
+# npm resolves a file: dependency by path, so a stale node_modules would silently probe an old
+# tarball, which is the one thing this prototype must never do.
+echo "=== installing (npm, to match a published consumer)"
+rm -rf node_modules package-lock.json
+npm install --no-audit --no-fund --loglevel=error
 
 echo "=== booting wrangler dev on :$PORT"
 npx wrangler dev --port "$PORT" --local > wrangler.log 2>&1 &
