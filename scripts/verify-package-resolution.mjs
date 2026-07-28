@@ -76,9 +76,7 @@ const runCheck = (message, body) => {
 }
 
 try {
-    step('Building the package')
-    run('pnpm', ['run', 'build'], repoRoot)
-
+    // `prepack` builds, so packing here exercises the same path that produces the published tarball.
     step('Packing the tarball')
     run('pnpm', ['pack', '--pack-destination', workDir], repoRoot)
     const tarball = readdirSync(workDir).find((entry) => entry.endsWith('.tgz'))

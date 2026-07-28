@@ -33,6 +33,7 @@
     "scripts": {
         "clean": "rm -rf dist",
         "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+        "prepack": "pnpm run build",
         "test": "vitest",
         "test:run": "vitest run",
         "typecheck": "tsc --noEmit",
