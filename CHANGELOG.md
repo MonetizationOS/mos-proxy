@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.5.3
+
+### Patch Changes
+
+- [#32](https://github.com/MonetizationOS/mos-proxy/pull/32) [`b3dd7ab`](https://github.com/MonetizationOS/mos-proxy/commit/b3dd7ab07039f425a42f5ef027308742c250d012) Thanks [@jayfeng0625](https://github.com/jayfeng0625)! - Publish an ESM build Node resolves without a bundler. The emitted JavaScript and type declarations previously carried extensionless relative specifiers, so importing the package from plain Node failed with `ERR_UNSUPPORTED_DIR_IMPORT` and a consumer on `moduleResolution: NodeNext` could not resolve its types. Self-hosted Node integrations no longer need a build step.
+
 ## 1.5.2
 
 ### Patch Changes
