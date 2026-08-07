@@ -10,5 +10,8 @@
         "rootDir": "src"
     },
     "include": ["src/**/*.ts"],
-    "exclude": ["test", "dist", "node_modules"]
+    "exclude": ["test", "dist", "node_modules"],
+    "tsc-alias": {
+        "resolveFullPaths": true
+    }
 }

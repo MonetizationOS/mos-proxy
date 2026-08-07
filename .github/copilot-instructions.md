@@ -21,12 +21,15 @@ pnpm lint
 pnpm typecheck
 pnpm test:run
 pnpm build
+pnpm verify:package
 ```
 
 Notes:
 
 - `pnpm test` starts watch mode; use `pnpm test:run` in agents and CI.
-- `pnpm typecheck` covers `src/**/*.ts` and `test/**/*.ts`; `pnpm build` emits only `src/` to `dist/`.
+- `pnpm typecheck` covers `src/**/*.ts` and `test/**/*.ts`; `pnpm build` runs `pnpm clean`, emits only `src/` to `dist/`, then rewrites the emitted specifiers with `tsc-alias`.
+- `pnpm clean` removes `dist/`. Anything that needs an empty `dist/` calls it rather than deleting the directory itself, so `tsc` never inherits outputs from a source file that has since been renamed or deleted.
+- `pnpm verify:package` packs the tarball, installs it into a scratch consumer, then scans the installed `dist` for relative specifiers Node cannot resolve, imports the package from plain Node, and type-checks against it on `moduleResolution: NodeNext`. It does not build; `prepack` does, so the tarball it verifies is produced the same way the published one is. Run it when you touch packaging, `tsconfig*.json`, or the shape of an import; CI runs it on Node 22 and 24, the only versions this package supports.
 - If lint fails, run `pnpm format`, then rerun `pnpm lint`.
 - Do not commit `dist/`, `node_modules/`, `coverage/`, or lockfile changes unless dependencies changed.
 
@@ -54,6 +57,7 @@ Stages 3-6 are HTML-only and auto-skip otherwise. `.withoutHtmlTransformation()`
 
 - Keep `src/` runtime code edge-safe: no Node-only APIs such as `fs`, `path`, `process`, or `Buffer`. This applies to executable code; JSDoc examples may reference consumer-side patterns like `process.env`.
 - Use ESM `import`/`export`; no `require`.
+- Relative specifiers stay extensionless, including directory imports of a barrel: `'./config'`, `'./adapters'`. `moduleResolution: Bundler` accepts that form, and `tsc-alias --resolveFullPaths` rewrites every emitted `.js` and `.d.ts` to the full path Node needs. `pnpm verify:package` scans the packed `dist` and fails on any relative specifier left without a runtime extension, so the artifact is what enforces this, not the source form.
 - Follow Biome formatting: 4-space indent, single quotes, no semicolons, trailing commas, LF line endings.
 - `nursery.noFloatingPromises` is an error; always `await` promises or mark them with `void`.
 - `noUncheckedIndexedAccess` is enabled; narrow indexed values before use.
@@ -63,5 +67,6 @@ Stages 3-6 are HTML-only and auto-skip otherwise. `.withoutHtmlTransformation()`
 
 - User-facing changes in `src/` need a Changeset: run `pnpm changeset` and commit the generated `.changeset/*.md`.
 - Package version is duplicated in `src/apiRequestHeaders.ts` as `MOS_PROXY_PACKAGE_VERSION`. If manually bumping `package.json`, also update that constant or run `node scripts/sync-version.mjs && pnpm format`.
-- `prepublishOnly` runs `typecheck && test:run && build`; do not bypass it.
+- `prepack` runs `build`, so every `pnpm pack` and `pnpm publish` produces a freshly built tarball no matter who invokes it. Nothing else needs to build first, which is why `verify:package` does not.
+- `prepublishOnly` runs `typecheck && test:run && verify:package`; do not bypass it. It is the whole publish gate: `release.yml` only installs and hands off to the Changesets action. Note that `prepublishOnly` fires before `prepack`, so it validates the working tree rather than the finished tarball. `ci.yml` and `release.yml` are independent workflows on the same push, so a red CI run does not by itself stop a publish.
 - `pnpm-workspace.yaml` sets `minimumReleaseAge: 4320`, so very recent dependency versions may be rejected during install. Choose an older version instead of disabling the setting.
