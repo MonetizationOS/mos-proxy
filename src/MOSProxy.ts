@@ -108,7 +108,7 @@ export class MOSProxy {
             if (!apiFetcher) {
                 throw new Error('MOSProxy: customEndpoints is enabled but no API fetcher is configured')
             }
-            const customEndpointResponse = await customEndpointRequest(ctx, request, apiFetcher)
+            const customEndpointResponse = await customEndpointRequest(ctx, request, identityProvider, clientMetadataProvider, apiFetcher)
             if (customEndpointResponse) {
                 return customEndpointResponse
             }
