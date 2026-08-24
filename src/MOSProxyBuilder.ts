@@ -235,6 +235,21 @@ export class MOSProxyBuilder {
                     method: 'POST',
                     mosPath: '/api/v1/offer-redemptions',
                 },
+                {
+                    matchPath: '/mos-api/access-checks',
+                    method: 'POST',
+                    mosPath: '/api/v1/access-checks',
+                },
+                {
+                    matchPath: '/mos-api/surface-decisions',
+                    method: 'POST',
+                    mosPath: '/api/v1/surface-decisions',
+                },
+                {
+                    matchPath: '/mos-api/counter-updates',
+                    method: 'POST',
+                    mosPath: '/api/v1/counter-updates',
+                },
             ],
         }
         return new MOSProxy(opts)

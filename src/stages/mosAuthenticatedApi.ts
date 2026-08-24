@@ -75,7 +75,7 @@ const handleMosAuthenticatedApiRoute = async (
             }),
             headers: withMosProxyHeaders({
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${config.mosSecretKey}`,
+                Authorization: `PublicBearer ${config.mosSecretKey}`,
             }),
         }),
     )

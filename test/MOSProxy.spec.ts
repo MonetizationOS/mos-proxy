@@ -598,7 +598,12 @@ describe('custom authenticated API routes', () => {
 
     beforeEach(() => requestCaptor.mockReset())
 
-    it('forwards matching offer redemption request', async () => {
+    it.each([
+        '/offer-redemptions',
+        '/surface-decisions',
+        '/access-checks',
+        '/counter-updates',
+    ])('forwards matching %s request', async (path) => {
         const proxy = new MOSProxyBuilder()
             .withConfig(baseConfig)
             .withApiFetcher(apiFetcher)
@@ -608,9 +613,9 @@ describe('custom authenticated API routes', () => {
             .build()
 
         const response = await proxy.handle(
-            new Request('https://proxy.example.com/mos-api/offer-redemptions', {
+            new Request(`https://proxy.example.com/mos-api${path}`, {
                 method: 'POST',
-                body: JSON.stringify({ offerToken: 'offer.abc' }),
+                body: JSON.stringify({ bodyProperty: 'value' }),
                 headers: {
                     cookie: 'anon-session=the-session;',
                 },
@@ -620,16 +625,16 @@ describe('custom authenticated API routes', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ success: true })
         expect(requestCaptor).toHaveBeenCalledExactlyOnceWith(
-            'https://api.monetizationos.com/api/v1/offer-redemptions', //
+            `https://api.monetizationos.com/api/v1${path}`, //
             'POST',
             {
                 custom: 'metadata',
-                http: { url: 'https://proxy.example.com/mos-api/offer-redemptions' },
+                http: { url: `https://proxy.example.com/mos-api${path}` },
                 identity: { anonymousIdentifier: 'the-session' },
-                offerToken: 'offer.abc',
+                bodyProperty: 'value',
             },
             [
-                ['authorization', 'Bearer sk_env_test_abc'],
+                ['authorization', 'PublicBearer sk_env_test_abc'],
                 ['content-type', 'application/json'],
                 ['x-mos-proxy-client', expect.any(String)],
                 ['x-mos-proxy-version', expect.any(String)],
@@ -770,7 +775,7 @@ describe('custom authenticated API routes', () => {
                 prop: 'value',
             },
             [
-                ['authorization', 'Bearer sk_env_test_abc'],
+                ['authorization', 'PublicBearer sk_env_test_abc'],
                 ['content-type', 'application/json'],
                 ['x-mos-proxy-client', expect.any(String)],
                 ['x-mos-proxy-version', expect.any(String)],
