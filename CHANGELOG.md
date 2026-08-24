@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.6.0
+
+### Minor Changes
+
+- [#34](https://github.com/MonetizationOS/mos-proxy/pull/34) [`89b4faa`](https://github.com/MonetizationOS/mos-proxy/commit/89b4faa3917e8b37de8162c8eb434c93dbf34ae6) Thanks [@JFL110](https://github.com/JFL110)! - Forward permission-downgraded API key to mos-api/ and mos-endpoints/ paths, and add support for identity details for custom endpoints, to be consumed by MOS in the future.
+
 ## 1.5.3
 
 ### Patch Changes
