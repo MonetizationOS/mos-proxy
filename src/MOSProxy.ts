@@ -3,10 +3,12 @@ import type { ClientMetadataProvider } from './adapters/ClientMetadataProvider'
 import type { ConfigFactory, UnresolvedConfigHandler } from './adapters/ConfigFactory'
 import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
-import type { IdentityProvider } from './adapters/IdentityProvider'
+import { getExistingCookies, type IdentityProvider } from './adapters/IdentityProvider'
 import type { ResourceProvider } from './adapters/ResourceProvider'
+import type { MOSConfig } from './config'
 import { ConfigResolution } from './configResolution'
 import type { PipelineContext } from './context'
+import { type ExpiredJwt, readExpiredJwt } from './jwt'
 import { consoleLogger, type MOSProxyLogger } from './logger'
 import customEndpointRequest from './stages/customEndpoint'
 import isRedirectResponse from './stages/isRedirectResponse'
@@ -42,6 +44,31 @@ export interface MOSProxyHtmlPipelineErrorContext {
  */
 export type MOSProxyHtmlPipelineErrorHandler = (ctx: MOSProxyHtmlPipelineErrorContext) => Response | Promise<Response>
 
+export interface MOSProxyJwtExpiredContext {
+    request: Request
+    config: MOSConfig
+    /** Raw JWT from `authenticatedUserJwtCookieName`. Unverified. */
+    jwt: string
+    claims: ExpiredJwt['claims']
+    /** `exp` claim as unix seconds. */
+    expiredAt: number
+}
+
+/**
+ * Called when the incoming request carries an authenticated-user JWT whose `exp` is in the past.
+ * Return a `Response` to replace the proxy reply (for example a page reload). Return nothing to
+ * keep proxying. Runs before origin fetch and custom
+ * endpoint routing, on every request that presents the expired cookie — filter on `Sec-Fetch-Dest`
+ * or `Accept` if only document navigations should be intercepted.
+ *
+ * Expiry is read from the unverified payload. MonetizationOS still authenticates the token when
+ * the handler lets the request continue.
+ *
+ * If the callback throws or returns a non-Response value, the proxy logs a warning and continues
+ * the pipeline.
+ */
+export type MOSProxyJwtExpiredHandler = (ctx: MOSProxyJwtExpiredContext) => Response | undefined | Promise<Response | undefined>
+
 export interface MOSProxyOptions {
     /** A static config, or a per-request {@link ConfigFactory}. */
     config: MOSConfigInput | ConfigFactory
@@ -57,6 +84,7 @@ export interface MOSProxyOptions {
     maxCachedConfigs?: number
     logger?: MOSProxyLogger
     onHtmlPipelineError?: MOSProxyHtmlPipelineErrorHandler
+    onJwtExpired?: MOSProxyJwtExpiredHandler | null
     customEndpointsEnabled: boolean
     linkRewritingEnabled: boolean
     surfaceDecisionsEnabled: boolean
@@ -102,6 +130,11 @@ export class MOSProxy {
             return resolved
         }
         const ctx: PipelineContext = { config: resolved, logger }
+
+        const expiredJwtResponse = await handleExpiredJwt(request, resolved, this.opts.onJwtExpired ?? null, logger)
+        if (expiredJwtResponse) {
+            return expiredJwtResponse
+        }
 
         // Stage 1a: custom endpoint routing
         if (this.opts.customEndpointsEnabled) {
@@ -233,6 +266,57 @@ export class MOSProxy {
                 return failOpenResponse
             }
         }
+    }
+}
+
+const handleExpiredJwt = async (
+    request: Request,
+    config: MOSConfig,
+    handler: MOSProxyJwtExpiredHandler | null,
+    logger: MOSProxyLogger,
+): Promise<Response | null> => {
+    if (!handler) {
+        return null
+    }
+
+    const userJwt = getExistingCookies(request, undefined, config).userJwt
+    if (!userJwt) {
+        return null
+    }
+
+    const expired = readExpiredJwt(userJwt)
+    if (!expired) {
+        return null
+    }
+
+    try {
+        const handlerResponse = await handler({
+            request,
+            config,
+            jwt: userJwt,
+            claims: expired.claims,
+            expiredAt: expired.expiredAt,
+        })
+        if (handlerResponse == null) {
+            return null
+        }
+        if (!(handlerResponse instanceof Response)) {
+            logger.log({
+                level: 'warn',
+                code: 'jwt-expired-handler-invalid',
+                message: 'onJwtExpired did not return a Response; continuing the proxy pipeline.',
+            })
+            return null
+        }
+        return handlerResponse
+    } catch (error) {
+        logger.log({
+            level: 'warn',
+            code: 'jwt-expired-handler-threw',
+            message: 'onJwtExpired threw; continuing the proxy pipeline.',
+            error,
+        })
+        return null
     }
 }
 

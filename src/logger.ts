@@ -14,6 +14,8 @@ export type MOSProxyLogCode =
     | 'surface-decisions-api-failed'
     | 'identity-resolve-failed'
     | 'identity-persist-failed'
+    | 'jwt-expired-handler-invalid'
+    | 'jwt-expired-handler-threw'
     | 'link-rewriting-header-failed'
     | 'link-rewriting-body-failed'
     | 'marker-pass-invalid-state'

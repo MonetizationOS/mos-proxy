@@ -817,6 +817,166 @@ describe('MOSProxy API-only mode (withoutHtmlTransformation)', () => {
     })
 })
 
+const encodeJwtPart = (value: object) => {
+    const bytes = new TextEncoder().encode(JSON.stringify(value))
+    let binary = ''
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte)
+    }
+    return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+const sessionJwt = (payload: Record<string, unknown>) => `${encodeJwtPart({ alg: 'none', typ: 'JWT' })}.${encodeJwtPart(payload)}.sig`
+
+describe('MOSProxy expired JWT handler', () => {
+    it('returns the handler response and skips the origin when the JWT cookie is expired', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse('<p>origin</p>'))
+        const apiFetcher = MockFetcher(() => decisionsResponse())
+        let sawExp: number | undefined
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withJwtExpiredHandler(({ expiredAt, claims }) => {
+                sawExp = expiredAt
+                expect(claims.sub).toBe('user-1')
+                return new Response('refresh', { status: 401, headers: { Refresh: '0' } })
+            })
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: `__session=${sessionJwt({ sub: 'user-1', exp: 1 })}` },
+            }),
+        )
+
+        expect(sawExp).toBe(1)
+        expect(response.status).toBe(401)
+        expect(response.headers.get('Refresh')).toBe('0')
+        expect(await response.text()).toBe('refresh')
+        expect(originFetcher.calls.length).toBe(0)
+        expect(apiFetcher.calls.length).toBe(0)
+    })
+
+    it('keeps proxying when the handler returns nothing', async () => {
+        const originFetcher = MockFetcher(() => new Response('asset', { status: 200, headers: { 'Content-Type': 'text/css' } }))
+        const apiFetcher = MockFetcher(() => decisionsResponse())
+        let calls = 0
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withJwtExpiredHandler(() => {
+                calls += 1
+            })
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/app.css', {
+                headers: { Cookie: `__session=${sessionJwt({ exp: 1 })}` },
+            }),
+        )
+
+        expect(calls).toBe(1)
+        expect(await response.text()).toBe('asset')
+        expect(originFetcher.calls.length).toBe(1)
+        expect(apiFetcher.calls.length).toBe(0)
+    })
+
+    it('does not call the handler for a JWT that is still valid', async () => {
+        const originFetcher = MockFetcher(() => new Response('ok', { status: 200, headers: { 'Content-Type': 'text/plain' } }))
+        let calls = 0
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(MockFetcher(() => decisionsResponse()))
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withJwtExpiredHandler(() => {
+                calls += 1
+                return new Response('nope', { status: 401 })
+            })
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: `__session=${sessionJwt({ exp: 9_999_999_999 })}` },
+            }),
+        )
+
+        expect(calls).toBe(0)
+        expect(await response.text()).toBe('ok')
+        expect(originFetcher.calls.length).toBe(1)
+    })
+
+    it('proxies an expired JWT when no handler is registered', async () => {
+        const originFetcher = MockFetcher(() => new Response('ok', { status: 200, headers: { 'Content-Type': 'text/plain' } }))
+
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(MockFetcher(() => decisionsResponse()))
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .build()
+
+        const response = await proxy.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: `__session=${sessionJwt({ exp: 1 })}` },
+            }),
+        )
+
+        expect(await response.text()).toBe('ok')
+        expect(originFetcher.calls.length).toBe(1)
+    })
+
+    it('continues the pipeline when the handler throws or returns a non-Response', async () => {
+        const { events, logger } = createMemoryLogger()
+        const originFetcher = MockFetcher(() => new Response('ok', { status: 200, headers: { 'Content-Type': 'text/plain' } }))
+
+        const throwing = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(MockFetcher(() => decisionsResponse()))
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withLogger(logger)
+            .withJwtExpiredHandler(() => {
+                throw new Error('handler boom')
+            })
+            .build()
+
+        const thrown = await throwing.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: `__session=${sessionJwt({ exp: 1 })}` },
+            }),
+        )
+        expect(await thrown.text()).toBe('ok')
+        expect(events).toContainEqual(expect.objectContaining({ level: 'warn', code: 'jwt-expired-handler-threw' }))
+
+        events.length = 0
+        const invalid = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(originFetcher)
+            .withApiFetcher(MockFetcher(() => decisionsResponse()))
+            .withHtmlRewriter(new PassthroughHtmlRewriter())
+            .withLogger(logger)
+            .withJwtExpiredHandler(() => 'refresh' as unknown as Response)
+            .build()
+
+        const invalidResponse = await invalid.handle(
+            new Request('https://proxy.example.com/article', {
+                headers: { Cookie: `__session=${sessionJwt({ exp: 1 })}` },
+            }),
+        )
+        expect(await invalidResponse.text()).toBe('ok')
+        expect(events).toContainEqual(expect.objectContaining({ level: 'warn', code: 'jwt-expired-handler-invalid' }))
+        expect(originFetcher.calls.length).toBe(2)
+    })
+})
+
 describe('MOSProxyBuilder validation', () => {
     it('requires config', () => {
         expect(() => new MOSProxyBuilder().withOriginFetcher(MockFetcher(() => new Response(null))).build()).toThrow(/withConfig/)

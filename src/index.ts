@@ -35,6 +35,8 @@ export {
     type MOSProxyHtmlPipelineErrorContext,
     type MOSProxyHtmlPipelineErrorHandler,
     type MOSProxyHtmlPipelineStage,
+    type MOSProxyJwtExpiredContext,
+    type MOSProxyJwtExpiredHandler,
     type MOSProxyOptions,
 } from './MOSProxy'
 export { MOSProxyBuilder } from './MOSProxyBuilder'

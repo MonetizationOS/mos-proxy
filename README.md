@@ -126,6 +126,40 @@ Skip HTML transformation entirely when the proxy only needs to handle API traffi
 const proxy = new MOSProxyBuilder().withConfig(config).withoutHtmlTransformation().build();
 ```
 
+## Expired JWT
+
+`.withJwtExpiredHandler(...)` runs when the incoming request's authenticated-user JWT cookie (`authenticatedUserJwtCookieName`) has an `exp` claim in the past. Expiry is read from the unverified payload, before the origin fetch, so a worker can replace the reply — for example with a page reload — or return nothing and let the proxy continue. MonetizationOS still authenticates the token when the request continues.
+
+The callback runs for every request that presents the expired cookie, including assets and `/mos-endpoints/`. Limit a reload to document navigations inside the handler.
+
+```ts
+const proxy = new MOSProxyBuilder()
+    .withConfig(config)
+    .withHtmlRewriter(myHtmlRewriterAdapter)
+    .withJwtExpiredHandler(({ request }) => {
+        if (request.headers.get("Sec-Fetch-Dest") !== "document") {
+            return;
+        }
+
+        const url = new URL(request.url);
+        if (url.searchParams.has("reloaded")) {
+            return;
+        }
+        url.searchParams.set("reloaded", "1");
+
+        return new Response(null, {
+            status: 200,
+            headers: {
+                Refresh: `0; url=${url}`,
+                "Cache-Control": "no-store",
+            },
+        });
+    })
+    .build();
+```
+
+The first document request reloads once, to the same page with `?reloaded=1`. That follow-up still carries the expired JWT, but the handler returns nothing, so the proxy continues and forwards the token to the MonetizationOS API. A reload of the exact same URL, with no flag, would send the expired cookie again and the handler would reload forever.
+
 ## Error handling and logging
 
 The HTML pipeline fails open by default: on error, the proxy logs a structured event and returns the last safe response so the origin page still gets served. Register an error handler to shape that response yourself — render a custom error page, return a 503, or rethrow so the host runtime's error middleware takes over.
