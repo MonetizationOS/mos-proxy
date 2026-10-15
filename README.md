@@ -126,6 +126,18 @@ Skip HTML transformation entirely when the proxy only needs to handle API traffi
 const proxy = new MOSProxyBuilder().withConfig(config).withoutHtmlTransformation().build();
 ```
 
+## HTML stages without the proxy
+
+`applyComponentBehaviors` and `parsePageMetadata` run the proxy's own HTML stages on a page you already hold, so the
+result matches what `MOSProxy` would serve.
+
+```ts
+import { applyComponentBehaviors, parsePageMetadata } from '@monetizationos/proxy';
+
+const meta = await parsePageMetadata(page.clone(), rewriter, { logger });
+const rewritten = await applyComponentBehaviors(page, surfaceDecisions, rewriter, { logger, injectScriptUrl });
+```
+
 ## Error handling and logging
 
 The HTML pipeline fails open by default: on error, the proxy logs a structured event and returns the last safe response so the origin page still gets served. Register an error handler to shape that response yourself — render a custom error page, return a 503, or rethrow so the host runtime's error middleware takes over.

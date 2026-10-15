@@ -1,8 +1,8 @@
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
-import type { PipelineContext } from '../context'
+import type { HtmlStageContext } from '../context'
 import type { PageMetadata } from '../types'
 
-export async function parsePageMetadata(ctx: PipelineContext, response: Response, rewriter: HtmlRewriterAdapter): Promise<PageMetadata> {
+export async function parsePageMetadata(ctx: HtmlStageContext, response: Response, rewriter: HtmlRewriterAdapter): Promise<PageMetadata> {
     const metadata: PageMetadata = {}
 
     try {

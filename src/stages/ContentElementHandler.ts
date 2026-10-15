@@ -1,5 +1,5 @@
 import type { ElementHandlers, RewriterElement } from '../adapters/HtmlRewriterAdapter'
-import type { PipelineContext } from '../context'
+import type { HtmlStageContext } from '../context'
 import type { WebContentSurfaceBehavior } from '../types'
 import { renderElement } from './elements'
 
@@ -8,9 +8,9 @@ const reverseTransformPositions: ReadonlyArray<(typeof transformPositions)[numbe
 
 export class ContentElementHandler implements ElementHandlers {
     content: WebContentSurfaceBehavior
-    private readonly ctx: PipelineContext
+    private readonly ctx: HtmlStageContext
 
-    constructor(ctx: PipelineContext, content: WebContentSurfaceBehavior) {
+    constructor(ctx: HtmlStageContext, content: WebContentSurfaceBehavior) {
         this.ctx = ctx
         this.content = content
     }

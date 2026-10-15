@@ -11,3 +11,9 @@ export interface PipelineContext {
     config: MOSConfig
     logger: MOSProxyLogger
 }
+
+/** What the HTML stages read, so they can also run outside the pipeline (see `applyComponentBehaviors`). */
+export type HtmlStageContext = Pick<PipelineContext, 'logger'>
+
+/** Component transforms also inject the configured script tag. */
+export type ComponentStageContext = HtmlStageContext & { config: Pick<MOSConfig, 'injectScriptUrl'> }

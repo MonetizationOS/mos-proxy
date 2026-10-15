@@ -1,5 +1,5 @@
 import type { ElementHandlers, RewriterElement, RewriterText } from '../adapters/HtmlRewriterAdapter'
-import type { PipelineContext } from '../context'
+import type { HtmlStageContext } from '../context'
 import type { SubSurfaceBehaviorApi } from '../types'
 import { renderElement } from './elements'
 import type { ComponentRange } from './findMarkerPositions'
@@ -16,7 +16,7 @@ export type ReplacementHandler = { selector: string; handler: ElementHandlers }
  * the caller should skip this step.
  */
 export const buildReplacementHandlers = (
-    ctx: PipelineContext,
+    ctx: HtmlStageContext,
     subSurface: SubSurfaceBehaviorApi,
     ranges: ComponentRange[] | undefined,
 ): ReplacementHandler[] => {

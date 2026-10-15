@@ -1,12 +1,12 @@
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
-import type { PipelineContext } from '../context'
+import type { ComponentStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 import { buildReplacementHandlers } from './buildReplacementHandlers'
 import { ContentElementHandler } from './ContentElementHandler'
 import { findMarkerPositions } from './findMarkerPositions'
 
 export default async function handleSurfaceComponents(
-    ctx: PipelineContext,
+    ctx: ComponentStageContext,
     response: Response,
     surfaceDecisions: SurfaceDecisionResponse,
     rewriter: HtmlRewriterAdapter,
