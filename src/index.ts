@@ -26,6 +26,7 @@ export {
     defaultResolveIdentity,
     getExistingCookies,
 } from './adapters'
+export { applyComponentBehaviors, type ComponentBehaviorOptions, parsePageMetadata } from './applyComponentBehaviors'
 export type { MOSConfig } from './config'
 export { ConfigUnresolvableError } from './configResolution'
 export { type HostPathRule, hostPathMatcher } from './hostPathMatcher'

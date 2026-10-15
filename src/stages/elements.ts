@@ -1,8 +1,8 @@
 import type { ContentOptions } from '../adapters/HtmlRewriterAdapter'
-import type { PipelineContext } from '../context'
+import type { HtmlStageContext } from '../context'
 import type { WebComponentElement, WebElement } from '../types'
 
-export const renderElement = (ctx: PipelineContext, element: WebElement): [string, ContentOptions] => {
+export const renderElement = (ctx: HtmlStageContext, element: WebElement): [string, ContentOptions] => {
     try {
         const mapped = {
             ...element,

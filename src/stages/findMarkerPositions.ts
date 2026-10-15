@@ -1,5 +1,5 @@
 import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
-import type { PipelineContext } from '../context'
+import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 
 export type SurfaceMarkers = {
@@ -25,7 +25,7 @@ type Handler = { selector: string; componentKey: string; handler: ElementHandler
  * Runs a single pass of the rewriter over a cloned response to build per-component marker maps.
  */
 export const findMarkerPositions = async (
-    ctx: PipelineContext,
+    ctx: HtmlStageContext,
     response: Response,
     surfaceDecisions: SurfaceDecisionResponse,
     rewriter: HtmlRewriterAdapter,
