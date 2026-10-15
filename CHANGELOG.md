@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.7.0
+
+### Minor Changes
+
+- [#37](https://github.com/MonetizationOS/mos-proxy/pull/37) [`eb958ab`](https://github.com/MonetizationOS/mos-proxy/commit/eb958abbf70d96e5c79352702c8aa817fe87ddaa) Thanks [@benney](https://github.com/benney)! - Export `applyComponentBehaviors` and `parsePageMetadata`, which run the proxy's HTML stages on a page held outside the pipeline.
+
 ## 1.6.0
 
 ### Minor Changes
