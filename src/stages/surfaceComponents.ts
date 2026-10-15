@@ -4,6 +4,7 @@ import type { SurfaceDecisionResponse } from '../types'
 import { buildReplacementHandlers } from './buildReplacementHandlers'
 import { ContentElementHandler } from './ContentElementHandler'
 import { findMarkerPositions } from './findMarkerPositions'
+import { spliceRangeReplacements } from './spliceRangeReplacements'
 
 export default async function handleSurfaceComponents(
     ctx: PipelineContext,
@@ -14,7 +15,19 @@ export default async function handleSurfaceComponents(
     if (surfaceDecisions.componentsSkipped) {
         return response
     }
+    const spliced = rewriter.capabilities.onEndTag ? await spliceRangeReplacements(response, surfaceDecisions, rewriter) : null
+    return spliced
+        ? transformComponents(ctx, spliced.response, spliced.surfaceDecisions, rewriter)
+        : transformComponents(ctx, response, surfaceDecisions, rewriter)
+}
 
+/** The per-element path: every component, ranges included, in one streaming rewrite after the marker pass. */
+export async function transformComponents(
+    ctx: PipelineContext,
+    response: Response,
+    surfaceDecisions: SurfaceDecisionResponse,
+    rewriter: HtmlRewriterAdapter,
+): Promise<Response> {
     const { config, logger } = ctx
     const supportsRangeReplacement = rewriter.capabilities.onEndTag
     const { markers, componentsWithInvalidSelectors } = supportsRangeReplacement
