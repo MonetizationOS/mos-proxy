@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.8.0
+
+### Minor Changes
+
+- [#40](https://github.com/MonetizationOS/mos-proxy/pull/40) [`8b696fa`](https://github.com/MonetizationOS/mos-proxy/commit/8b696fada774f319200b573a336a20b8d2da0a1c) Thanks [@benney](https://github.com/benney)! - Origin requests carry the viewer's host and protocol as `X-Forwarded-Host` and `X-Forwarded-Proto`, so origins can build URLs on the public domain. `originRequestHeaders` can override either.
+
 ## 1.7.0
 
 ### Minor Changes
