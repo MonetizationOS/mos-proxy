@@ -60,6 +60,31 @@ describe('performOriginRequest', () => {
         expect(headers.get('x-keep')).toBe('client-value')
     })
 
+    it("sends the viewer's host and protocol as X-Forwarded-Host and X-Forwarded-Proto", async () => {
+        const fetcher = MockFetcher(() => new Response('ok'))
+
+        await performOriginRequest(
+            ctx(),
+            new Request('http://news.example.com:8080/page', {
+                headers: { 'X-Forwarded-Host': 'other.example', 'X-Forwarded-Proto': 'https', Forwarded: 'host=other.example' },
+            }),
+            fetcher,
+        )
+
+        const headers = fetcher.calls[0]!.request.headers
+        expect(headers.get('x-forwarded-host')).toBe('news.example.com:8080')
+        expect(headers.get('x-forwarded-proto')).toBe('http')
+        expect(headers.has('forwarded')).toBe(false)
+    })
+
+    it('lets origin request headers override the forwarded headers', async () => {
+        const fetcher = MockFetcher(() => new Response('ok'))
+
+        await performOriginRequest(ctx({ 'X-Forwarded-Host': 'origin.example.com' }), new Request('https://news.example.com/page'), fetcher)
+
+        expect(fetcher.calls[0]!.request.headers.get('x-forwarded-host')).toBe('origin.example.com')
+    })
+
     it('preserves method and body while adding origin request headers', async () => {
         const fetcher = MockFetcher(async (request) => {
             expect(request.method).toBe('POST')
