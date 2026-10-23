@@ -138,6 +138,37 @@ const meta = await parsePageMetadata(page.clone(), rewriter, { logger });
 const rewritten = await applyComponentBehaviors(page, surfaceDecisions, rewriter, { logger, injectScriptUrl });
 ```
 
+## Expired JWT
+
+Not needed if your origin runs your auth provider's middleware (for example Clerk): the origin's own redirect passes
+through the proxy.
+
+Otherwise, configure a re-auth URL on the JWT integration in MonetizationOS. When the authenticated-user JWT has
+expired, the proxy redirects top-level navigations (`GET` with `Sec-Fetch-Mode: navigate`) there with a `307`,
+`Cache-Control: no-store` and a 30-second `mos-jwt-refresh` cookie that stops a redirect loop. Other requests fall back
+to anonymous, reusing the visitor's anonymous session cookie. The proxy never decodes the JWT; MonetizationOS decides.
+
+To override the reply, register a handler. Return a `Response` to use it, or nothing to keep the default. `http` is the
+redirect MonetizationOS suggested, if any.
+
+```ts
+const proxy = new MOSProxyBuilder()
+    .withConfig(config)
+    .withHtmlRewriter(myHtmlRewriterAdapter)
+    .withJwtExpiredHandler(({ request, http }) => {
+        if (!http) {
+            return;
+        }
+        const signIn = new URL("https://example.com/sign-in");
+        signIn.searchParams.set("redirect_url", request.url);
+        return new Response(null, {
+            status: 307,
+            headers: { Location: signIn.toString(), "Cache-Control": "no-store" },
+        });
+    })
+    .build();
+```
+
 ## Error handling and logging
 
 The HTML pipeline fails open by default: on error, the proxy logs a structured event and returns the last safe response so the origin page still gets served. Register an error handler to shape that response yourself — render a custom error page, return a 503, or rethrow so the host runtime's error middleware takes over.

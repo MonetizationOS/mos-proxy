@@ -5,6 +5,7 @@ import type { Fetcher } from './adapters/Fetcher'
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
 import type { IdentityProvider } from './adapters/IdentityProvider'
 import type { ResourceProvider } from './adapters/ResourceProvider'
+import type { MOSConfig } from './config'
 import { ConfigResolution } from './configResolution'
 import type { PipelineContext } from './context'
 import { consoleLogger, type MOSProxyLogger } from './logger'
@@ -17,7 +18,7 @@ import shouldIgnorePath from './stages/shouldIgnorePath'
 import handleSurfaceBehavior from './stages/surfaceBehavior'
 import handleSurfaceComponents from './stages/surfaceComponents'
 import getSurfaceDecisions from './stages/surfaceDecisions'
-import type { MOSConfigInput, MosAuthenticatedApiRoute } from './types'
+import type { MOSConfigInput, ModifyHttpResponse, MosAuthenticatedApiRoute } from './types'
 
 export type MOSProxyHtmlPipelineStage =
     | 'origin-response'
@@ -42,6 +43,25 @@ export interface MOSProxyHtmlPipelineErrorContext {
  */
 export type MOSProxyHtmlPipelineErrorHandler = (ctx: MOSProxyHtmlPipelineErrorContext) => Response | Promise<Response>
 
+export interface MOSProxyJwtExpiredContext {
+    request: Request
+    config: MOSConfig
+    logger: MOSProxyLogger
+    /** The API's suggested reply (for example a 307 to the re-auth URL), if any. */
+    http?: ModifyHttpResponse | undefined
+}
+
+/**
+ * Called when the surface-decisions API reports the authenticated-user JWT as expired
+ * (`code: 'jwt_expired'`). Return a `Response` to use it as the proxy reply, or nothing to keep the
+ * default: apply the API's `http` instruction when present, otherwise serve the origin response.
+ * The proxy never decodes the JWT; expiry is decided by MonetizationOS.
+ *
+ * If the callback throws or returns a non-Response value, the proxy logs a warning and applies the
+ * default.
+ */
+export type MOSProxyJwtExpiredHandler = (ctx: MOSProxyJwtExpiredContext) => Response | undefined | Promise<Response | undefined>
+
 export interface MOSProxyOptions {
     /** A static config, or a per-request {@link ConfigFactory}. */
     config: MOSConfigInput | ConfigFactory
@@ -57,6 +77,7 @@ export interface MOSProxyOptions {
     maxCachedConfigs?: number
     logger?: MOSProxyLogger
     onHtmlPipelineError?: MOSProxyHtmlPipelineErrorHandler
+    onJwtExpired?: MOSProxyJwtExpiredHandler | null
     customEndpointsEnabled: boolean
     linkRewritingEnabled: boolean
     surfaceDecisionsEnabled: boolean
@@ -172,6 +193,7 @@ export class MOSProxy {
                 clientIpProvider,
                 identityProvider,
                 resourceProvider,
+                this.opts.onJwtExpired ?? null,
             )
             if (!surfaceDecisions) {
                 return modifiedResponse

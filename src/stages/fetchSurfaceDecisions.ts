@@ -3,7 +3,7 @@ import type { Identity } from '../adapters/IdentityProvider'
 import type { Resource } from '../adapters/ResourceProvider'
 import { withMosProxyHeaders } from '../apiRequestHeaders'
 import type { PipelineContext } from '../context'
-import type { SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
+import type { ModifyHttpResponse, SurfaceDecisionError, SurfaceDecisionResponse } from '../types'
 
 export type FetchSurfaceDecisionsArgs = {
     identity: Identity
@@ -30,6 +30,10 @@ export type FetchSurfaceDecisionsResult =
           error: unknown
           status?: number
           statusCode?: number
+          /** API error code, e.g. `jwt_expired`. */
+          code?: string
+          /** API-suggested reply for this error. */
+          http?: ModifyHttpResponse
       }
 
 export default async function fetchSurfaceDecisions(
@@ -85,6 +89,8 @@ export default async function fetchSurfaceDecisions(
             error: new Error(data.message),
             status: response.status,
             statusCode: data.statusCode,
+            ...(data.code !== undefined && { code: data.code }),
+            ...(data.http !== undefined && { http: data.http }),
         }
     }
 
@@ -112,7 +118,12 @@ export default async function fetchSurfaceDecisions(
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
 const isSurfaceDecisionError = (value: unknown): value is SurfaceDecisionError =>
-    isRecord(value) && value.status === 'error' && typeof value.message === 'string' && typeof value.statusCode === 'number'
+    isRecord(value) &&
+    value.status === 'error' &&
+    typeof value.message === 'string' &&
+    typeof value.statusCode === 'number' &&
+    (value.code === undefined || typeof value.code === 'string') &&
+    (value.http === undefined || isRecord(value.http))
 
 const isSurfaceDecisionResponse = (value: unknown): value is SurfaceDecisionResponse =>
     isRecord(value) &&

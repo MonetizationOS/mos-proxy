@@ -1,5 +1,5 @@
 import { statusAllowsBody } from '../http'
-import type { SurfaceDecisionResponse } from '../types'
+import type { ModifyHttpResponse, SetHttpResponse, SurfaceDecisionResponse } from '../types'
 
 type ReturnImmediately = boolean
 
@@ -11,7 +11,10 @@ export default function handleSurfaceBehavior(
     if (!http || Object.keys(http).length === 0) {
         return [response, false]
     }
+    return applyHttpBehavior(response, http)
+}
 
+export function applyHttpBehavior(response: Response, http: ModifyHttpResponse | SetHttpResponse): [Response, ReturnImmediately] {
     let headers = new Headers(response.headers)
     let status = response.status
     let statusText = response.statusText

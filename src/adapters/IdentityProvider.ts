@@ -5,7 +5,14 @@ import type { SurfaceDecisionResponse } from '../types'
 
 export type Identity =
     | { createAnonymousIdentifier: true }
-    | { userJwt: string; createAnonymousIdentifierFallback?: true }
+    | {
+          userJwt: string
+          createAnonymousIdentifierFallback?: true
+          /** Ask the API to return `jwt_expired` instead of falling back when the JWT has expired. */
+          jwtExpiredHandling?: 'shortCircuit'
+          /** The visitor's existing anonymous session, reused if the API falls back to anonymous. */
+          anonymousIdentifier?: string
+      }
     | { anonymousIdentifier: string }
 
 export interface ResolveIdentityArgs {

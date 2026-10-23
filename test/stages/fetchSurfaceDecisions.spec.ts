@@ -220,6 +220,20 @@ describe('fetchSurfaceDecisions', () => {
         }
     })
 
+    it('surfaces the error code and http instruction on api-error', async () => {
+        const http = { status: 307, addHeaders: [{ name: 'Location', value: 'https://auth.example.com/' }], addCookies: [] }
+        const fetcher = MockFetcher(
+            () =>
+                new Response(JSON.stringify({ status: 'error', message: 'jwt_expired', statusCode: 401, code: 'jwt_expired', http }), {
+                    status: 401,
+                }),
+        )
+
+        const result = await fetchSurfaceDecisions(ctx, args(), fetcher)
+
+        expect(result).toMatchObject({ ok: false, reason: 'api-error', statusCode: 401, code: 'jwt_expired', http })
+    })
+
     it('reports http-error when status is non-2xx and the body is JSON but not an error shape', async () => {
         const fetcher = MockFetcher(() => new Response(JSON.stringify({ unrelated: true }), { status: 503 }))
 

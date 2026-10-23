@@ -106,6 +106,10 @@ export interface SurfaceDecisionError {
     message: string
     status: 'error'
     statusCode: number
+    /** Machine-readable reason, e.g. `jwt_expired`. */
+    code?: string
+    /** Suggested reply, same shape as `surfaceBehavior.http`. Sent with `jwt_expired` when short-circuiting. */
+    http?: ModifyHttpResponse
 }
 
 export type MosAuthenticatedApiRoute = {

@@ -6,7 +6,7 @@ import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
 import type { IdentityProvider } from './adapters/IdentityProvider'
 import type { ResourceProvider } from './adapters/ResourceProvider'
 import type { MOSProxyLogger } from './logger'
-import { MOSProxy, type MOSProxyHtmlPipelineErrorHandler, type MOSProxyOptions } from './MOSProxy'
+import { MOSProxy, type MOSProxyHtmlPipelineErrorHandler, type MOSProxyJwtExpiredHandler, type MOSProxyOptions } from './MOSProxy'
 import type { MOSConfigInput, MosAuthenticatedApiRoute } from './types'
 
 /**
@@ -56,6 +56,7 @@ export class MOSProxyBuilder {
     private _configCacheSize: number | null = null
     private _logger: MOSProxyLogger | null = null
     private _onHtmlPipelineError: MOSProxyHtmlPipelineErrorHandler | null = null
+    private _onJwtExpired: MOSProxyJwtExpiredHandler | null = null
     private _customEndpoints = true
     private _linkRewriting = true
     private _surfaceDecisions = true
@@ -163,6 +164,17 @@ export class MOSProxyBuilder {
         return this
     }
 
+    /**
+     * Override the reply when the surface-decisions API reports the user's JWT as expired. Return a
+     * `Response` to use it, or nothing to keep the default (the API's redirect for navigations,
+     * otherwise the origin response). If it throws or returns a non-Response value, the proxy logs a
+     * warning and applies the default.
+     */
+    withJwtExpiredHandler(handler: MOSProxyJwtExpiredHandler): this {
+        this._onJwtExpired = handler
+        return this
+    }
+
     withoutCustomEndpoints(): this {
         this._customEndpoints = false
         return this
@@ -224,6 +236,7 @@ export class MOSProxyBuilder {
             maxCachedConfigs: this._configCacheSize ?? undefined,
             logger: this._logger ?? undefined,
             onHtmlPipelineError: this._onHtmlPipelineError ?? undefined,
+            onJwtExpired: this._onJwtExpired ?? undefined,
             customEndpointsEnabled: this._customEndpoints,
             linkRewritingEnabled: this._linkRewriting,
             surfaceDecisionsEnabled: this._surfaceDecisions,
