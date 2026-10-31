@@ -100,6 +100,9 @@ const adaptElement = (element: WasmElement): RewriterElement => ({
     get tagName() {
         return element.tagName
     },
+    get namespaceURI() {
+        return element.namespaceURI
+    },
     getAttribute: (name) => element.getAttribute(name),
     hasAttribute: (name) => element.hasAttribute(name),
     setAttribute: (name, value) => {

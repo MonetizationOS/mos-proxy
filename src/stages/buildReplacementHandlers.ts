@@ -3,6 +3,7 @@ import type { HtmlStageContext } from '../context'
 import type { SubSurfaceBehaviorApi } from '../types'
 import { renderElement } from './elements'
 import type { ComponentRange } from './findMarkerPositions'
+import { isVoidElement } from './voidElements'
 
 type ReplacementState = {
     operation: 'SCANNING' | 'REMOVING' | 'REPLACED'
@@ -69,7 +70,7 @@ export const buildReplacementHandlers = (
                     const [content, options] = renderElement(ctx, after)
                     element.after(content, options)
                 }
-                if (element.onEndTag) {
+                if (element.onEndTag && !isVoidElement(element)) {
                     try {
                         element.onEndTag(() => {
                             state.operation = 'REMOVING'

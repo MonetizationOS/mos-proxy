@@ -1,6 +1,7 @@
 import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
 import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
+import { isVoidElement } from './voidElements'
 
 export type SurfaceMarkers = {
     componentsWithInvalidSelectors: string[]
@@ -81,7 +82,7 @@ export const findMarkerPositions = async (
                                 nextEndMarker: null,
                             }
                             currentRange.markers[elementCounter] = marker
-                            if (element.onEndTag) {
+                            if (element.onEndTag && !isVoidElement(element)) {
                                 try {
                                     element.onEndTag(() => {
                                         marker.endTag = elementCounter
