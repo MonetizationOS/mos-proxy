@@ -110,17 +110,20 @@ export const buildReplacementHandlers = (
             const state: ReplacementState = { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
             states.push(state)
 
-            if (state.operation === 'REMOVING') {
-                for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
-                    const [content, options] = renderElement(ctx, prepend)
-                    element.prepend(content, options)
+            try {
+                if (state.operation === 'REMOVING') {
+                    for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
+                        const [content, options] = renderElement(ctx, prepend)
+                        element.prepend(content, options)
+                    }
                 }
-            }
 
-            if (element.onEndTag) {
-                element.onEndTag(() => {
+                element.onEndTag?.(() => {
                     states.pop()
                 })
+            } catch {
+                // A container with no end tag (`img`, or a self-closing `<path/>`) has no content to cut, and the runtime throws on it.
+                states.pop()
             }
         },
 

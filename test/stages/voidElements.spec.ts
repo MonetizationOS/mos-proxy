@@ -157,3 +157,39 @@ describe('isVoidElement', () => {
         expect(isVoidElement(element('br'))).toBe(false)
     })
 })
+
+describe('range replacement when the container has no end tag', () => {
+    it.each([
+        ['without markers', {}],
+        ['with a fromMarker', { fromMarker: 'span' }],
+    ])('leaves a void container alone %s', async (_, replaceRange) => {
+        const html = '<p>a</p><img class="hero" src="x.png"><p>b</p>'
+        const { body } = await run(html, replaceRange, 'img.hero')
+        expect(body).toBe(html)
+    })
+
+    it('leaves a self-closing foreign container alone', async () => {
+        const html = '<svg><path class="hero" d="M0"/></svg><p>b</p>'
+        const { body } = await run(html, {}, 'path.hero')
+        expect(body).toBe(html)
+    })
+
+    it('pops the state of a void container nested in a matching container', async () => {
+        const { body } = await run(
+            '<div class="hero"><span class="s">s</span><img class="hero"><p>x</p></div>',
+            { fromMarker: '.s' },
+            '.hero',
+        )
+        expect(body).toBe('<div class="hero"><span class="s">s</span><i>NEW</i></div>')
+    })
+
+    it('still replaces the content of a void-named container inside SVG', async () => {
+        const { body } = await run('<svg><link class="hero"><circle/></link></svg>', {}, 'link.hero')
+        expect(body).toBe('<svg><link class="hero"><i>NEW</i></link></svg>')
+    })
+
+    it('still replaces a later container once an earlier match had no end tag', async () => {
+        const { body } = await run('<img class="hero"><svg><path class="hero"/></svg><div class="hero"><p>x</p></div>', {}, '.hero')
+        expect(body).toBe('<img class="hero"><svg><path class="hero"/></svg><div class="hero"><i>NEW</i></div>')
+    })
+})
