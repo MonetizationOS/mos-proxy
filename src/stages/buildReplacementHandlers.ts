@@ -102,37 +102,43 @@ export const buildReplacementHandlers = (
         }
     }
 
-    // A nested container is part of the outer one's range; set by the handler registered ahead of `parentHandler`
-    let nested = false
+    // Open containers; a container inside another one is part of the outer one's range
+    let depth = 0
 
     const parentHandler: ElementHandlers = {
         element(element: RewriterElement) {
-            if (nested) {
-                nested = false
+            if (depth > 0) {
                 return
             }
             rangeIndex++
-            if (element.removed) {
-                return
+            // A removed container still counts towards `depth`, so the ranges line up with the marker pass
+            const state: ReplacementState | null = element.removed ? null : { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
+            if (state) {
+                states.push(state)
             }
 
-            const state: ReplacementState = { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
-            states.push(state)
-
             try {
-                if (state.operation === 'REMOVING') {
+                if (state?.operation === 'REMOVING') {
                     for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
                         const [content, options] = renderElement(ctx, prepend)
                         element.prepend(content, options)
                     }
                 }
 
-                element.onEndTag?.(() => {
-                    states.pop()
-                })
+                if (element.onEndTag) {
+                    element.onEndTag(() => {
+                        depth--
+                        if (state) {
+                            states.pop()
+                        }
+                    })
+                    depth++
+                }
             } catch {
                 // A container with no end tag (`img`, or a self-closing `<path/>`) has no content to cut, and the runtime throws on it.
-                states.pop()
+                if (state) {
+                    states.pop()
+                }
             }
         },
 
@@ -149,14 +155,6 @@ export const buildReplacementHandlers = (
         return []
     }
     return [
-        {
-            selector: `${selector} ${selector}`,
-            handler: {
-                element() {
-                    nested = true
-                },
-            },
-        },
         { selector, handler: parentHandler },
         { selector: `${selector} *`, handler: { element: onChildElement } },
     ]

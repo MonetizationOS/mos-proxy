@@ -53,30 +53,30 @@ export const findMarkerPositions = async (
             const { toMarker, fromMarker } = modification
             let elementCounter = 0
             let currentRange: ComponentRange | null = null
-            // A nested container is part of the outer one's range; set by the handler registered ahead of the container's
-            let nested = false
+            // Open containers; a container inside another one is part of the outer one's range
+            let depth = 0
 
             const entries: (Handler | null)[] = [
-                {
-                    selector: `${componentBehavior.metadata.cssSelector} ${componentBehavior.metadata.cssSelector}`,
-                    componentKey,
-                    handler: {
-                        element: () => {
-                            nested = true
-                        },
-                    },
-                },
                 {
                     selector: `${componentBehavior.metadata.cssSelector}`,
                     componentKey,
                     handler: {
-                        element: () => {
-                            if (nested) {
-                                nested = false
+                        element: (element: RewriterElement) => {
+                            if (depth > 0) {
                                 return
                             }
                             currentRange = { markers: [] }
                             markers[componentKey]?.push(currentRange)
+                            if (element.onEndTag && !isVoidElement(element)) {
+                                try {
+                                    element.onEndTag(() => {
+                                        depth--
+                                    })
+                                    depth++
+                                } catch {
+                                    // No end tag, so nothing can be nested in it
+                                }
+                            }
                         },
                     },
                 },

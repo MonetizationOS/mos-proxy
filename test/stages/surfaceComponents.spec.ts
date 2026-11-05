@@ -333,10 +333,10 @@ describe('handleSurfaceComponents', () => {
     })
 
     describe('replaceRange with nested matches', () => {
-        const replaceRange = async (body: string, range: { fromMarker?: string }) => {
+        const replaceRange = async (body: string, range: { fromMarker?: string }, cssSelector = '.c') => {
             const decision = decisions({
                 range: {
-                    metadata: { cssSelector: '.c' },
+                    metadata: { cssSelector },
                     content: { replaceRange: { ...range, replaceWith: [{ type: 'html', content: '<i>NEW</i>' }] } },
                 },
             })
@@ -373,6 +373,34 @@ describe('handleSurfaceComponents', () => {
         it('replaces the whole outermost container when nested containers have no markers', async () => {
             const body = await replaceRange('<div class="c"><p>a</p><div class="c"><p>b</p></div><p>c</p></div>', {})
             expect(body).toBe('<div class="c"><i>NEW</i></div>')
+        })
+
+        it('still cuts a later container after one removed by another component', async () => {
+            const decision = decisions({
+                gone: { metadata: { cssSelector: '#gone' }, content: { remove: true } },
+                range: {
+                    metadata: { cssSelector: '.c' },
+                    content: { replaceRange: { fromMarker: 'p.s', replaceWith: [{ type: 'html', content: '<i>NEW</i>' }] } },
+                },
+            })
+            const page =
+                '<div class="c" id="gone"><div class="c"><p class="s">a</p><p>b</p></div></div><div class="c"><p class="s">e</p><p>f</p></div>'
+            const result = await handleSurfaceComponents(baseCtx, html(page), decision, new LolHtmlRewriter())
+            expect(await result.text()).toBe('<div class="c"><p class="s">e</p><i>NEW</i></div>')
+        })
+
+        it('applies the range to a container matched by a selector list', async () => {
+            const body = await replaceRange('<div class="c"><p class="s">a</p><p>b</p></div>', { fromMarker: 'p.s' }, '.x, .c')
+            expect(body).toBe('<div class="c"><p class="s">a</p><i>NEW</i></div>')
+        })
+
+        it('applies the range to the outermost of nested containers matched by a descendant selector', async () => {
+            const body = await replaceRange(
+                '<main><div class="c"><div class="c"><p class="s">a</p><p>b</p></div><p class="s">c</p><p>d</p></div></main>',
+                { fromMarker: 'p.s' },
+                'main .c',
+            )
+            expect(body).toBe('<main><div class="c"><div class="c"><p class="s">a</p><i>NEW</i></div></div></main>')
         })
     })
 
