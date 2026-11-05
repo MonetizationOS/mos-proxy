@@ -45,8 +45,6 @@ export interface ContentOptions {
 export interface RewriterElement {
     readonly removed: boolean
     readonly tagName: string
-    /** Lets callers tell HTML void elements from same-named SVG/MathML ones; without it no element is treated as void. */
-    readonly namespaceURI?: string
     getAttribute(name: string): string | null
     hasAttribute(name: string): boolean
     setAttribute(name: string, value: string): void

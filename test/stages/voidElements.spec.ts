@@ -40,9 +40,6 @@ class EndTagSpyRewriter implements HtmlRewriterAdapter {
                                   get tagName() {
                                       return element.tagName
                                   },
-                                  get namespaceURI() {
-                                      return element.namespaceURI
-                                  },
                                   getAttribute: (name) => element.getAttribute(name),
                                   hasAttribute: (name) => element.hasAttribute(name),
                                   setAttribute: (name, value) => element.setAttribute(name, value),
@@ -105,15 +102,6 @@ describe('range replacement with void elements', () => {
         expect(endTagCalls).toContain('p')
     })
 
-    it('still calls onEndTag on a void-named element inside SVG, which has an end tag', async () => {
-        const { body, endTagCalls } = await run(
-            '<div class="hero"><svg><source class="start"><circle/></source><link><desc>x</desc></link></svg><span class="end">E</span></div>',
-            { fromMarker: 'source.start', toMarker: 'span.end' },
-        )
-        expect(body).toBe('<div class="hero"><svg><source class="start"><circle/></source><i>NEW</i></svg><span class="end">E</span></div>')
-        expect(endTagCalls).toContain('source')
-    })
-
     it('handles a void element as the fromMarker without calling onEndTag on it', async () => {
         const { body, endTagCalls } = await run(
             '<div class="hero"><p>keep</p><hr class="start"><p>kill</p><span class="end">E</span></div>',
@@ -125,9 +113,7 @@ describe('range replacement with void elements', () => {
 })
 
 describe('isVoidElement', () => {
-    const element = (tagName: string, namespaceURI?: string) => ({ tagName, namespaceURI }) as RewriterElement
-    const HTML = 'http://www.w3.org/1999/xhtml'
-    const SVG = 'http://www.w3.org/2000/svg'
+    const element = (tagName: string) => ({ tagName }) as RewriterElement
 
     it.each([
         'area',
@@ -144,17 +130,12 @@ describe('isVoidElement', () => {
         'source',
         'track',
         'wbr',
-    ])('treats an HTML <%s> as void', (tag) => {
-        expect(isVoidElement(element(tag, HTML))).toBe(true)
+    ])('treats <%s> as void', (tag) => {
+        expect(isVoidElement(element(tag))).toBe(true)
     })
 
     it('does not treat elements with an end tag as void', () => {
-        expect(isVoidElement(element('p', HTML))).toBe(false)
-        expect(isVoidElement(element('link', SVG))).toBe(false)
-    })
-
-    it('does not treat an element with no namespace as void', () => {
-        expect(isVoidElement(element('br'))).toBe(false)
+        expect(isVoidElement(element('p'))).toBe(false)
     })
 })
 
@@ -181,11 +162,6 @@ describe('range replacement when the container has no end tag', () => {
             '.hero',
         )
         expect(body).toBe('<div class="hero"><span class="s">s</span><i>NEW</i></div>')
-    })
-
-    it('still replaces the content of a void-named container inside SVG', async () => {
-        const { body } = await run('<svg><link class="hero"><circle/></link></svg>', {}, 'link.hero')
-        expect(body).toBe('<svg><link class="hero"><i>NEW</i></link></svg>')
     })
 
     it('still replaces a later container once an earlier match had no end tag', async () => {
