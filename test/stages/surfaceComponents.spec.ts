@@ -332,6 +332,50 @@ describe('handleSurfaceComponents', () => {
         expect(events).toContainEqual(expect.objectContaining({ level: 'warn', code: 'replacement-markers-identical' }))
     })
 
+    describe('replaceRange with nested matches', () => {
+        const replaceRange = async (body: string, range: { fromMarker?: string }) => {
+            const decision = decisions({
+                range: {
+                    metadata: { cssSelector: '.c' },
+                    content: { replaceRange: { ...range, replaceWith: [{ type: 'html', content: '<i>NEW</i>' }] } },
+                },
+            })
+            return (await handleSurfaceComponents(baseCtx, html(body), decision, new LolHtmlRewriter())).text()
+        }
+
+        it('starts the range at the first start marker when it holds another', async () => {
+            const body = await replaceRange('<div class="c"><div class="s"><p class="s">a</p><p>b</p></div><p>c</p></div>', {
+                fromMarker: '.s',
+            })
+            expect(body).toBe('<div class="c"><div class="s"><p class="s">a</p><p>b</p></div><i>NEW</i></div>')
+        })
+
+        it('starts the range at the first start marker when both are nested in the container', async () => {
+            const body = await replaceRange(
+                '<div class="c"><section><div class="s"><p class="s">a</p></div><p>b</p></section><p>c</p></div>',
+                {
+                    fromMarker: '.s',
+                },
+            )
+            expect(body).toBe('<div class="c"><section><div class="s"><p class="s">a</p></div><i>NEW</i></section></div>')
+        })
+
+        it('applies the range to the outermost of nested containers', async () => {
+            const body = await replaceRange(
+                '<div class="c"><div class="c"><p class="s">a</p><p>b</p></div><p class="s">c</p><p>d</p></div><div class="c"><p class="s">e</p><p>f</p></div>',
+                { fromMarker: 'p.s' },
+            )
+            expect(body).toBe(
+                '<div class="c"><div class="c"><p class="s">a</p><i>NEW</i></div></div><div class="c"><p class="s">e</p><i>NEW</i></div>',
+            )
+        })
+
+        it('replaces the whole outermost container when nested containers have no markers', async () => {
+            const body = await replaceRange('<div class="c"><p>a</p><div class="c"><p>b</p></div><p>c</p></div>', {})
+            expect(body).toBe('<div class="c"><i>NEW</i></div>')
+        })
+    })
+
     it('falls back gracefully when findMarkerPositions rejects a marker selector — other components still apply', async () => {
         const { events, logger } = createRecordingLogger()
         const response = html('<html><body><div class="bad">leave</div><div class="ok">orig</div></body></html>')

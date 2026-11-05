@@ -53,13 +53,28 @@ export const findMarkerPositions = async (
             const { toMarker, fromMarker } = modification
             let elementCounter = 0
             let currentRange: ComponentRange | null = null
+            // A nested container is part of the outer one's range; set by the handler registered ahead of the container's
+            let nested = false
 
             const entries: (Handler | null)[] = [
+                {
+                    selector: `${componentBehavior.metadata.cssSelector} ${componentBehavior.metadata.cssSelector}`,
+                    componentKey,
+                    handler: {
+                        element: () => {
+                            nested = true
+                        },
+                    },
+                },
                 {
                     selector: `${componentBehavior.metadata.cssSelector}`,
                     componentKey,
                     handler: {
                         element: () => {
+                            if (nested) {
+                                nested = false
+                                return
+                            }
                             currentRange = { markers: [] }
                             markers[componentKey]?.push(currentRange)
                         },

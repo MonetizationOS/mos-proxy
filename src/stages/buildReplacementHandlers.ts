@@ -6,7 +6,8 @@ import type { ComponentRange } from './findMarkerPositions'
 import { isVoidElement } from './voidElements'
 
 type ReplacementState = {
-    operation: 'SCANNING' | 'REMOVING' | 'REPLACED'
+    // `IN_START`: a start marker nested in the first one doesn't start the range again
+    operation: 'SCANNING' | 'IN_START' | 'REMOVING' | 'REPLACED'
 }
 
 export type ReplacementHandler = { selector: string; handler: ElementHandlers }
@@ -70,6 +71,7 @@ export const buildReplacementHandlers = (
                     const [content, options] = renderElement(ctx, after)
                     element.after(content, options)
                 }
+                state.operation = 'IN_START'
                 if (element.onEndTag && !isVoidElement(element)) {
                     try {
                         element.onEndTag(() => {
@@ -100,8 +102,15 @@ export const buildReplacementHandlers = (
         }
     }
 
+    // A nested container is part of the outer one's range; set by the handler registered ahead of `parentHandler`
+    let nested = false
+
     const parentHandler: ElementHandlers = {
         element(element: RewriterElement) {
+            if (nested) {
+                nested = false
+                return
+            }
             rangeIndex++
             if (element.removed) {
                 return
@@ -140,6 +149,14 @@ export const buildReplacementHandlers = (
         return []
     }
     return [
+        {
+            selector: `${selector} ${selector}`,
+            handler: {
+                element() {
+                    nested = true
+                },
+            },
+        },
         { selector, handler: parentHandler },
         { selector: `${selector} *`, handler: { element: onChildElement } },
     ]
