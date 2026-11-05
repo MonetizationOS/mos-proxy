@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { ElementHandlers, HtmlRewriterAdapter, HtmlRewriterSession, RewriterElement } from '../../src/adapters/HtmlRewriterAdapter'
+import type { RewriterElement } from '../../src/adapters/HtmlRewriterAdapter'
 import { normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
-import handleSurfaceComponents from '../../src/stages/surfaceComponents'
+import { applyComponents } from '../../src/stages/surfaceComponents'
 import { isVoidElement } from '../../src/stages/voidElements'
 import type { SurfaceDecisionResponse } from '../../src/types'
-import { LolHtmlRewriter } from '../fakes/LolHtmlRewriter'
+import { EndTagSpyRewriter } from '../fakes/EndTagSpyRewriter'
 
 const ctx: PipelineContext = {
     config: normalizeMOSConfig({
@@ -17,45 +17,6 @@ const ctx: PipelineContext = {
         authenticatedUserJwtCookieName: '__session',
     }),
     logger: { log() {} },
-}
-
-/** Wraps the real rewriter and records the tag of every element `onEndTag` is called on. */
-class EndTagSpyRewriter implements HtmlRewriterAdapter {
-    readonly inner = new LolHtmlRewriter()
-    readonly capabilities = this.inner.capabilities
-    readonly endTagCalls: string[] = []
-
-    // Methods are bound to the element, which a real rewriter element needs
-    private spyOn(element: RewriterElement): RewriterElement {
-        const onEndTag: RewriterElement['onEndTag'] = (callback) => {
-            this.endTagCalls.push(element.tagName.toLowerCase())
-            element.onEndTag?.(callback)
-        }
-        return new Proxy(element, {
-            get: (target, prop) => {
-                if (prop === 'onEndTag') {
-                    return onEndTag
-                }
-                const value = Reflect.get(target, prop)
-                return typeof value === 'function' ? value.bind(target) : value
-            },
-        })
-    }
-
-    create(): HtmlRewriterSession {
-        const session = this.inner.create()
-        const spy: HtmlRewriterSession = {
-            on: (selector: string, handlers: ElementHandlers) => {
-                session.on(selector, {
-                    ...handlers,
-                    element: handlers.element ? (element) => handlers.element?.(this.spyOn(element)) : undefined,
-                })
-                return spy
-            },
-            transform: (response) => session.transform(response),
-        }
-        return spy
-    }
 }
 
 const decisions = (replaceRange: { fromMarker?: string; toMarker?: string }, cssSelector = 'div.hero'): SurfaceDecisionResponse => ({
@@ -76,7 +37,7 @@ const decisions = (replaceRange: { fromMarker?: string; toMarker?: string }, css
 const run = async (body: string, replaceRange: { fromMarker?: string; toMarker?: string }, cssSelector?: string) => {
     const rewriter = new EndTagSpyRewriter()
     const response = new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
-    const result = await handleSurfaceComponents(ctx, response, decisions(replaceRange, cssSelector), rewriter)
+    const result = await applyComponents(ctx, response, decisions(replaceRange, cssSelector), rewriter, null)
     return { body: await result.text(), endTagCalls: rewriter.endTagCalls }
 }
 

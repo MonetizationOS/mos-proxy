@@ -64,6 +64,10 @@ class LolHtmlSession implements HtmlRewriterSession {
             throw new Error('LolHtmlRewriter session can only transform a single response')
         }
         this.consumed = true
+        if (!response.body) {
+            this.rewriter.free()
+            return new Response(null, response)
+        }
 
         const rewriter = this.rewriter
         const chunks = this.chunks
@@ -125,6 +129,9 @@ const adaptElement = (element: WasmElement): RewriterElement => ({
     },
     remove: () => {
         element.remove()
+    },
+    removeAndKeepContent: () => {
+        element.removeAndKeepContent()
     },
     onEndTag: (callback) => {
         element.onEndTag(async () => {

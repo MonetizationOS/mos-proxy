@@ -55,6 +55,7 @@ export interface RewriterElement {
     append(content: string, options?: ContentOptions): void
     replace(content: string, options?: ContentOptions): void
     remove(): void
+    removeAndKeepContent(): void
     onEndTag?(callback: () => void | Promise<void>): void
 }
 
