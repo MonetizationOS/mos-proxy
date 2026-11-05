@@ -345,21 +345,47 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
         splice: async (page, rewriter, headers) => {
             // Only taken with one range, so every sentinel is that range's
             const needle = new TextEncoder().encode(sentinel(0, 'o').slice(0, -1))
-            const find = searcher(needle)
+            const { forward, backward } = finders(page, needle)
+            const kindAt = (at: number) => String.fromCharCode(page[at + needle.length] ?? 0)
+            const end = (at: number) => at + needle.length + 1
+            const closeTag = `</mos-range-${nonce}-0 `.length
+            if (wrapped === 1 && nested === 1) {
+                // One container: find the start of the cut from the top and its end from the bottom, never reading the cut
+                const o = forward(0)
+                const s = o === -1 ? -1 : forward(o + 1)
+                const r = s === -1 ? -1 : forward(s + 1)
+                const c = backward(page.length - 1)
+                if (kindAt(o) !== 'o' || kindAt(s) !== 's' || kindAt(r) !== 'r' || kindAt(c) !== 'c' || c < r) {
+                    return null
+                }
+                const before = backward(c - 1)
+                const resume = before === r ? c - closeTag : kindAt(before) === 'e' && before > r ? end(before) + COMMENT_CLOSE : -1
+                const closers = resume === -1 ? null : await closingTags(rewriter, page.subarray(end(o) + 1, s - COMMENT_OPEN), headers)
+                if (!closers) {
+                    return null
+                }
+                return concat([
+                    page.subarray(0, s - COMMENT_OPEN),
+                    page.subarray(end(s) + COMMENT_CLOSE, r - COMMENT_OPEN),
+                    closers,
+                    page.subarray(resume),
+                ])
+            }
+            const find = (from: number) => forward(from)
             const out: Uint8Array<ArrayBuffer>[] = []
             let copyFrom = 0
             let contentStart = -1
             let closers: Uint8Array<ArrayBuffer> | null = null
             let cutting = false
             let cuts = 0
-            for (let at = find(page, 0); at !== -1; at = find(page, at + 1)) {
-                const kind = String.fromCharCode(page[at + needle.length] ?? 0)
+            for (let at = find(0); at !== -1; at = find(at + 1)) {
+                const kind = kindAt(at)
                 const end = at + needle.length + 1
                 if (cutting) {
                     if (kind === 'e') {
                         copyFrom = end + COMMENT_CLOSE
                     } else if (kind === 'c') {
-                        copyFrom = at - `</mos-range-${nonce}-0 `.length
+                        copyFrom = at - closeTag
                     } else {
                         return null
                     }
@@ -389,35 +415,51 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                 return null
             }
             out.push(page.subarray(copyFrom))
-            const spliced = new Uint8Array(out.reduce((length, chunk) => length + chunk.length, 0))
-            let offset = 0
-            for (const chunk of out) {
-                spliced.set(chunk, offset)
-                offset += chunk.length
-            }
-            return spliced
+            return concat(out)
         },
     }
 }
 
-/** Finds `needle` in a page, skipping ahead by up to its length on a mismatch rather than reading every byte. */
-const searcher = (needle: Uint8Array) => {
-    const last = needle.length - 1
-    const skip = new Uint8Array(256).fill(needle.length)
-    for (let i = 0; i < last; i++) {
-        skip[needle[i] ?? 0] = last - i
+const concat = (chunks: Uint8Array<ArrayBuffer>[]) => {
+    const joined = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0))
+    let offset = 0
+    for (const chunk of chunks) {
+        joined.set(chunk, offset)
+        offset += chunk.length
     }
-    return (page: Uint8Array, from: number) => {
-        for (let at = from; at + last < page.length; at += skip[page[at + last] ?? 0] ?? 1) {
-            let i = last
-            while (i >= 0 && page[at + i] === needle[i]) {
-                i--
-            }
-            if (i < 0) {
-                return at
+    return joined
+}
+
+/**
+ * Finds `needle`, which starts with the rare `MARK` byte, from either end of a page. The native search for that byte
+ * keeps the cost low and steady; a byte loop in JavaScript was as fast only while the engine kept it optimised.
+ */
+const finders = (page: Uint8Array, needle: Uint8Array) => {
+    const matches = (at: number) => {
+        for (let i = 1; i < needle.length; i++) {
+            if (page[at + i] !== needle[i]) {
+                return false
             }
         }
-        return -1
+        return true
+    }
+    return {
+        forward: (from: number) => {
+            for (let at = page.indexOf(MARK, from); at !== -1; at = page.indexOf(MARK, at + 1)) {
+                if (matches(at)) {
+                    return at
+                }
+            }
+            return -1
+        },
+        backward: (from: number) => {
+            for (let at = from < 0 ? -1 : page.lastIndexOf(MARK, from); at !== -1; at = at === 0 ? -1 : page.lastIndexOf(MARK, at - 1)) {
+                if (matches(at)) {
+                    return at
+                }
+            }
+            return -1
+        },
     }
 }
 
