@@ -7,11 +7,12 @@ import type {
 } from '../../src/adapters/HtmlRewriterAdapter'
 import { LolHtmlRewriter } from './LolHtmlRewriter'
 
-/** Wraps the real rewriter and records the tag of every element `onEndTag` is called on. */
+/** Wraps the real rewriter and records the tag of every element `onEndTag` is called on, and how many passes ran. */
 export class EndTagSpyRewriter implements HtmlRewriterAdapter {
     readonly inner = new LolHtmlRewriter()
     readonly capabilities: HtmlRewriterCapabilities = this.inner.capabilities
     readonly endTagCalls: string[] = []
+    sessions = 0
 
     // Methods are bound to the element, which a real rewriter element needs
     private spyOn(element: RewriterElement): RewriterElement {
@@ -31,6 +32,7 @@ export class EndTagSpyRewriter implements HtmlRewriterAdapter {
     }
 
     create(): HtmlRewriterSession {
+        this.sessions++
         const session = this.inner.create()
         const spy: HtmlRewriterSession = {
             on: (selector: string, handlers: ElementHandlers) => {

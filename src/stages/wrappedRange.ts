@@ -1,6 +1,6 @@
 import type { ElementHandlers, RewriterElement } from '../adapters/HtmlRewriterAdapter'
 import type { HtmlStageContext } from '../context'
-import type { SubSurfaceBehaviorApi, SurfaceDecisionResponse } from '../types'
+import type { SurfaceDecisionResponse } from '../types'
 import { renderElement } from './elements'
 import { isVoidElement } from './voidElements'
 
@@ -9,77 +9,115 @@ type Handler = { selector: string; handler: ElementHandlers }
 // Their content is text, so a wrapper tag inserted into it is never parsed as a tag
 const RAW_TEXT_ELEMENTS = new Set(['iframe', 'noembed', 'noframes', 'noscript', 'plaintext', 'script', 'style', 'textarea', 'title', 'xmp'])
 
-const INSERTIONS = ['prepend', 'append', 'before', 'after'] as const
-
 const withoutNested = (selector: string) => selector.replace(/"[^"]*"|'[^']*'|\[[^\]]*\]|\([^)]*\)/g, '')
 // One compound selector, so `${container} > ${marker}` only matches a direct child
-const isCompound = (selector: string) => !/[\s>+~,]/.test(withoutNested(selector.trim()))
+const isCompound = (selector: string) => !/[\s>+~]/.test(withoutNested(selector.trim()))
+
+/** The top-level parts of a selector list. */
+export const splitSelectorList = (selector: string): string[] => {
+    const parts: string[] = []
+    let nesting = 0
+    let quote = ''
+    let start = 0
+    for (let i = 0; i < selector.length; i++) {
+        const char = selector[i]
+        if (char === '\\') {
+            i++
+        } else if (quote) {
+            quote = char === quote ? '' : quote
+        } else if (char === '"' || char === "'") {
+            quote = char
+        } else if (char === '(' || char === '[') {
+            nesting++
+        } else if (char === ')' || char === ']') {
+            nesting--
+        } else if (char === ',' && nesting === 0) {
+            parts.push(selector.slice(start, i).trim())
+            start = i + 1
+        }
+    }
+    parts.push(selector.slice(start).trim())
+    return parts
+}
+
+/** `${container}${combinator}${inner}` for every pair of parts, so a list on either side keeps the combinator. */
+export const combineSelectors = (container: string, combinator: ' ' | ' > ', inner: string) =>
+    splitSelectorList(container)
+        .flatMap((outer) => splitSelectorList(inner).map((part) => `${outer}${combinator}${part}`))
+        .join(', ')
 
 export type RangeWrapper = {
-    componentKey: string
+    componentKeys: string[]
     /** Pass 1, ahead of every other component: split each container into `<tag>` segments. */
     handlers: Handler[]
-    /** Pass 1, in the range component's own place, so they see markers removed by the components before it. */
-    checks: Handler[]
-    /** Pass 2: drop the segment holding the range and put the replacement there; unwrap the rest. */
-    unwrap: Handler
+    /** Pass 2: drop the segment holding each range and put its replacement there; unwrap the rest. */
+    unwrap: Handler[]
     wrapped: () => number
-    /** Pass 1 met a page the wrapper can't cut the way the element path would, so the caller must redo it that way. */
+    /** Pass 1 met a page the wrapper can't cut, so the caller must redo it element by element. */
     unsupported: () => boolean
     fail: () => void
 }
 
+type RangeState = {
+    depth: number
+    // `inStart`: a start marker nested in the first one doesn't start the range again
+    phase: 'scanning' | 'inStart' | 'open' | 'closed'
+    // Set by a `>` handler for the check on the same element, which runs after it
+    directStart: boolean
+    directEnd: boolean
+}
+
 /**
- * Cuts a range by splitting its container into wrapper elements in one pass and removing the one that holds the range
- * in the next, so the cut costs one callback instead of one per element. The split only balances when both markers
- * are direct children of the container. Only a decision with exactly one range component, and no other content on
- * that component, qualifies.
+ * Cuts each range by splitting its container into wrapper elements in one pass and removing the one that holds the
+ * range in the next, so the cut costs one callback instead of one per element. The split only balances when both
+ * markers are direct children of the outermost container; a nested marker makes the page unsupported. What other
+ * components insert inside the cut is removed with it, and a marker removed by another component still marks the cut.
+ * A container holding raw text, or inside `math`, is left alone.
  */
 export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisionResponse): RangeWrapper | null => {
-    const ranges = Object.entries(decisions.componentBehaviors).filter(([, b]) => b.content?.replaceRange && b.metadata.cssSelector)
-    if (ranges.length !== 1) {
+    const ranges = Object.entries(decisions.componentBehaviors).flatMap(([componentKey, behavior]) => {
+        const replaceRange = behavior.content?.replaceRange
+        const container = behavior.metadata.cssSelector
+        // The component path skips `:last-child` containers
+        return replaceRange && container && !container.includes(':last-child') ? [{ componentKey, replaceRange, container }] : []
+    })
+    if (!ranges.length) {
         return null
     }
-    const [componentKey, behavior] = ranges[0] as [string, SubSurfaceBehaviorApi]
-    const { replaceRange, ...others } = behavior.content ?? {}
-    if (!replaceRange || Object.values(others).some((value) => (Array.isArray(value) ? value.length : value))) {
-        return null
+    for (const { replaceRange } of ranges) {
+        const { fromMarker, toMarker } = replaceRange
+        if (fromMarker && toMarker && fromMarker === toMarker) {
+            return null
+        }
+        for (const marker of [fromMarker, toMarker]) {
+            if (marker && !splitSelectorList(marker).every(isCompound)) {
+                return null
+            }
+        }
     }
-    const { fromMarker, toMarker } = replaceRange
-    if (fromMarker && toMarker && fromMarker === toMarker) {
-        return null
-    }
-    const container = behavior.metadata.cssSelector as string
-    if ((fromMarker && !isCompound(fromMarker)) || (toMarker && !isCompound(toMarker)) || withoutNested(container).includes(',')) {
-        return null
-    }
-    // Components ahead of the range whose inserts the element path places differently, or keeps where the wrapper cuts
-    const keys = Object.keys(decisions.componentBehaviors)
-    const inserting = keys
-        .slice(0, keys.indexOf(componentKey))
-        .map((key) => decisions.componentBehaviors[key])
-        .filter((b) => b?.metadata.cssSelector && INSERTIONS.some((key) => b.content?.[key]?.length))
-        .map((b) => b?.metadata.cssSelector as string)
 
-    const tag = `mos-range-${Math.random().toString(36).slice(2, 10)}`
-    const cut = `<${tag}>`
-    const keep = `<${tag} data-keep>`
-    const close = `</${tag}>`
+    const nonce = Math.random().toString(36).slice(2, 10)
     const html = { html: true }
-    const replacement = (replaceRange.replaceWith ?? []).map((item) => renderElement(ctx, item))
 
     let unsupported = false
     let wrapped = 0
-    let depth = 0
-    // `inStart`: a start marker nested in the first one doesn't start the range again
-    let phase: 'scanning' | 'inStart' | 'open' | 'closed' = 'closed'
-    // Set by a `>` handler for the check on the same element, which runs after it
-    let directStart = false
-    let directEnd = false
-    // Cleared by the range's own check on the container, after the components ahead of it
-    let atContainer = false
+    // Ranges whose container handler has run for the current element, cleared once its marker handlers have run
+    let atContainer = 0
     // The rewriter mismatches the wrapper's end tags inside MathML
     let mathDepth = 0
+
+    // Only the last end tag callback registered on an element runs, so one registered on `math` keeps its count
+    const onEnd = (element: RewriterElement, callback: () => void) => {
+        const math = element.tagName.toLowerCase() === 'math'
+        element.onEndTag?.(
+            math
+                ? () => {
+                      mathDepth--
+                      callback()
+                  }
+                : callback,
+        )
+    }
 
     const handlers: Handler[] = [
         {
@@ -92,141 +130,154 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                             mathDepth--
                         })
                     } catch {
-                        // Self-closing `<math/>`, so nothing is inside it
                         mathDepth--
                     }
                 },
             },
         },
-        {
+    ]
+    const markers: Handler[] = []
+    const cleanups: Handler[] = []
+    const unwrap: Handler[] = []
+
+    ranges.forEach(({ replaceRange, container }, index) => {
+        const { fromMarker, toMarker } = replaceRange
+        const tag = `mos-range-${nonce}-${index}`
+        const cut = `<${tag}>`
+        const keep = `<${tag} data-keep>`
+        const close = `</${tag}>`
+        const state: RangeState = { depth: 0, phase: 'closed', directStart: false, directEnd: false }
+
+        handlers.push({
             selector: container,
             handler: {
                 element(element: RewriterElement) {
+                    // The same element holding two ranges would need two end tag callbacks
+                    unsupported ||= atContainer++ > 0
                     if (isVoidElement(element)) {
                         return
                     }
-                    if (!element.onEndTag || RAW_TEXT_ELEMENTS.has(element.tagName.toLowerCase()) || mathDepth > 0 || depth > 0) {
+                    if (!element.onEndTag) {
                         unsupported = true
                         return
                     }
-                    atContainer = true
-                    depth++
-                    phase = fromMarker ? 'scanning' : 'open'
+                    if (state.depth > 0) {
+                        // Only the outermost container is cut; counting this one marks the markers in it as nested
+                        try {
+                            onEnd(element, () => {
+                                state.depth--
+                            })
+                            state.depth++
+                        } catch {
+                            // No end tag, so nothing is nested in it
+                        }
+                        return
+                    }
+                    if (RAW_TEXT_ELEMENTS.has(element.tagName.toLowerCase()) || mathDepth > 0) {
+                        return
+                    }
+                    try {
+                        onEnd(element, () => {
+                            state.phase = 'closed'
+                            state.depth--
+                        })
+                    } catch {
+                        unsupported = true
+                        return
+                    }
+                    state.depth++
+                    state.phase = fromMarker ? 'scanning' : 'open'
                     // Closed by the container's own end, so what other components append lands outside it
                     element.prepend(fromMarker ? keep : cut, html)
                     element.append(close, html)
                     wrapped++
-                    try {
-                        element.onEndTag(() => {
-                            phase = 'closed'
-                            depth--
-                        })
-                    } catch {
-                        // Self-closing foreign element (`<path/>`), so there is no end tag to close the cut at
-                        unsupported = true
-                    }
                 },
             },
-        },
-    ]
-    const checks: Handler[] = [
-        {
+        })
+        cleanups.push({
             selector: container,
             handler: {
                 element() {
-                    atContainer = false
+                    atContainer = 0
                 },
             },
-        },
-    ]
+        })
 
-    if (toMarker) {
-        handlers.push({
-            selector: `${container} > ${toMarker}`,
-            handler: {
-                element(element: RewriterElement) {
-                    if (phase === 'open') {
-                        element.before(close + keep, html)
-                        phase = 'closed'
-                        directEnd = true
-                    }
+        if (toMarker) {
+            markers.push(
+                {
+                    selector: combineSelectors(container, ' > ', toMarker),
+                    handler: {
+                        element() {
+                            state.directEnd = state.depth === 1
+                        },
+                    },
                 },
-            },
-        })
-        checks.push({
-            selector: `${container} ${toMarker}`,
-            handler: {
-                element(element: RewriterElement) {
-                    if (directEnd) {
-                        directEnd = false
-                        unsupported ||= element.removed
-                    } else if (phase === 'open') {
-                        unsupported = true
-                    }
+                {
+                    selector: combineSelectors(container, ' ', toMarker),
+                    handler: {
+                        element(element: RewriterElement) {
+                            const direct = state.directEnd
+                            state.directEnd = false
+                            // Before the start marker, or inside it
+                            if (state.phase !== 'open') {
+                                return
+                            }
+                            if (!direct || atContainer) {
+                                unsupported = true
+                                return
+                            }
+                            element.before(close + keep, html)
+                            state.phase = 'closed'
+                        },
+                    },
                 },
-            },
-        })
-    }
-    if (fromMarker) {
-        handlers.push({
-            selector: `${container} > ${fromMarker}`,
-            handler: {
-                element(element: RewriterElement) {
-                    if (phase !== 'scanning') {
-                        return
-                    }
-                    element.after(close + cut, html)
-                    directStart = true
-                    phase = 'inStart'
-                    if (!element.onEndTag || isVoidElement(element)) {
-                        phase = 'open'
-                        return
-                    }
-                    try {
-                        element.onEndTag(() => {
-                            phase = 'open'
-                        })
-                    } catch {
-                        // Self-closing foreign element, so nothing is inside it
-                        phase = 'open'
-                    }
+            )
+        }
+        if (fromMarker) {
+            markers.push(
+                {
+                    selector: combineSelectors(container, ' > ', fromMarker),
+                    handler: {
+                        element() {
+                            state.directStart = state.depth === 1
+                        },
+                    },
                 },
-            },
-        })
-        checks.push({
-            selector: `${container} ${fromMarker}`,
-            handler: {
-                element(element: RewriterElement) {
-                    if (directStart) {
-                        directStart = false
-                        unsupported ||= element.removed
-                    } else if (phase === 'scanning') {
-                        unsupported = true
-                    }
+                {
+                    selector: combineSelectors(container, ' ', fromMarker),
+                    handler: {
+                        element(element: RewriterElement) {
+                            const direct = state.directStart
+                            state.directStart = false
+                            if (state.phase !== 'scanning') {
+                                return
+                            }
+                            if (!direct || atContainer) {
+                                unsupported = true
+                                return
+                            }
+                            element.after(close + cut, html)
+                            state.phase = 'inStart'
+                            try {
+                                if (!element.onEndTag || isVoidElement(element)) {
+                                    state.phase = 'open'
+                                } else {
+                                    onEnd(element, () => {
+                                        state.phase = 'open'
+                                    })
+                                }
+                            } catch {
+                                state.phase = 'open'
+                            }
+                        },
+                    },
                 },
-            },
-        })
-    }
+            )
+        }
 
-    // After the wrapper's own handlers, so they see its state for the same element
-    for (const selector of inserting) {
-        handlers.push({
-            selector,
-            handler: {
-                element() {
-                    if (atContainer || phase === 'open' || (phase === 'inStart' && directStart)) {
-                        unsupported = true
-                    }
-                },
-            },
-        })
-    }
-
-    return {
-        componentKey,
-        handlers,
-        checks,
-        unwrap: {
+        const replacement = (replaceRange.replaceWith ?? []).map((item) => renderElement(ctx, item))
+        unwrap.push({
             selector: tag,
             handler: {
                 element(element: RewriterElement) {
@@ -240,7 +291,14 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                     element.remove()
                 },
             },
-        },
+        })
+    })
+
+    return {
+        componentKeys: ranges.map(({ componentKey }) => componentKey),
+        // Every container handler, then every marker handler, so a marker sees whether it is also a container
+        handlers: [...handlers, ...markers, ...cleanups],
+        unwrap,
         wrapped: () => wrapped,
         unsupported: () => unsupported,
         fail: () => {
