@@ -122,6 +122,14 @@ describe('range replacement by wrapper', () => {
         expect(body).toBe('<div class="c"><p class="s">a</p><i>NEW</i></div>')
     })
 
+    it('removes stray end tags of void elements inside the cut', async () => {
+        const { body, endTagCalls } = await run('<div class="c"><p class="s">a</p><img src="x"></img><br></br><p>b</p></div>', '.c', {
+            fromMarker: 'p.s',
+        })
+        expect(body).toBe('<div class="c"><p class="s">a</p><i>NEW</i></div>')
+        expect(endTagCalls).toEqual(['div', 'p'])
+    })
+
     it('cuts after a start marker that holds another with one callback', async () => {
         const { body, endTagCalls } = await bothWays('<div class="c"><div class="s"><p class="s">a</p><p>b</p></div><p>c</p></div>', '.c', {
             fromMarker: '.s',
