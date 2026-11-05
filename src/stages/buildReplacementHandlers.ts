@@ -111,6 +111,10 @@ export const buildReplacementHandlers = (
                 return
             }
             rangeIndex++
+            // No content to cut
+            if (isVoidElement(element)) {
+                return
+            }
             // A removed container still counts towards `depth`, so the ranges line up with the marker pass
             const state: ReplacementState | null = element.removed ? null : { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
             if (state) {
@@ -135,7 +139,7 @@ export const buildReplacementHandlers = (
                     depth++
                 }
             } catch {
-                // A container with no end tag (`img`, or a self-closing `<path/>`) has no content to cut, and the runtime throws on it.
+                // `onEndTag` throws on a self-closing foreign container (`<path/>`), which has no end tag or content to cut
                 if (state) {
                     states.pop()
                 }

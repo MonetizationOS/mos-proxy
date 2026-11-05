@@ -25,37 +25,30 @@ class EndTagSpyRewriter implements HtmlRewriterAdapter {
     readonly capabilities = this.inner.capabilities
     readonly endTagCalls: string[] = []
 
+    // Methods are bound to the element, which a real rewriter element needs
+    private spyOn(element: RewriterElement): RewriterElement {
+        const onEndTag: RewriterElement['onEndTag'] = (callback) => {
+            this.endTagCalls.push(element.tagName.toLowerCase())
+            element.onEndTag?.(callback)
+        }
+        return new Proxy(element, {
+            get: (target, prop) => {
+                if (prop === 'onEndTag') {
+                    return onEndTag
+                }
+                const value = Reflect.get(target, prop)
+                return typeof value === 'function' ? value.bind(target) : value
+            },
+        })
+    }
+
     create(): HtmlRewriterSession {
         const session = this.inner.create()
         const spy: HtmlRewriterSession = {
             on: (selector: string, handlers: ElementHandlers) => {
                 session.on(selector, {
                     ...handlers,
-                    element: handlers.element
-                        ? (element) =>
-                              handlers.element?.({
-                                  get removed() {
-                                      return element.removed
-                                  },
-                                  get tagName() {
-                                      return element.tagName
-                                  },
-                                  getAttribute: (name) => element.getAttribute(name),
-                                  hasAttribute: (name) => element.hasAttribute(name),
-                                  setAttribute: (name, value) => element.setAttribute(name, value),
-                                  removeAttribute: (name) => element.removeAttribute(name),
-                                  before: (content, options) => element.before(content, options),
-                                  after: (content, options) => element.after(content, options),
-                                  prepend: (content, options) => element.prepend(content, options),
-                                  append: (content, options) => element.append(content, options),
-                                  replace: (content, options) => element.replace(content, options),
-                                  remove: () => element.remove(),
-                                  onEndTag: (callback) => {
-                                      this.endTagCalls.push(element.tagName.toLowerCase())
-                                      element.onEndTag?.(callback)
-                                  },
-                              })
-                        : undefined,
+                    element: handlers.element ? (element) => handlers.element?.(this.spyOn(element)) : undefined,
                 })
                 return spy
             },
@@ -100,6 +93,17 @@ describe('range replacement with void elements', () => {
             expect(endTagCalls).not.toContain(tag)
         }
         expect(endTagCalls).toContain('p')
+    })
+
+    it('cuts past void elements written with an end tag, which the cut leaves behind', async () => {
+        const { body, endTagCalls } = await run(
+            '<div class="hero"><span class="start">S</span><img src="a.png"></img><br></br><p>kill</p><span class="end">E</span></div>',
+            { fromMarker: 'span.start', toMarker: 'span.end' },
+        )
+        // The rewriter never hands a stray end tag to a handler, so cutting element by element can't remove it
+        expect(body).toBe('<div class="hero"><span class="start">S</span><i>NEW</i></img></br><span class="end">E</span></div>')
+        expect(endTagCalls).not.toContain('img')
+        expect(endTagCalls).not.toContain('br')
     })
 
     it('handles a void element as the fromMarker without calling onEndTag on it', async () => {
