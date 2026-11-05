@@ -201,7 +201,8 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                     try {
                         onEnd(element, () => {
                             state.phase = 'closed'
-                            state.depth--
+                            // Not a decrement: an inner container left open never runs its own callback
+                            state.depth = 0
                         })
                     } catch {
                         unsupported = true

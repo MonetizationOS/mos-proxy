@@ -336,6 +336,11 @@ describe('range replacement by wrapper', () => {
             expect(out).toBe('<div class="c"><math class="s"><mi class="c">x</mi></math><i>NEW</i></div>')
             expect(path).toBe('wrapper')
         })
+
+        it('still cut a later container after an inner one left without its end tag', async () => {
+            const body = '<ul class="c"><li class="c">x</ul><ul class="c"><li>y</li></ul>'
+            expect(await wrapped(body, '.c', {})).toBe('<ul class="c"><i>NEW</i></ul><ul class="c"><i>NEW</i></ul>')
+        })
     })
 
     it('cuts each container of a selector list', async () => {
