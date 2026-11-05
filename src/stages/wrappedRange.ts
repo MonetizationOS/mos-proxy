@@ -9,6 +9,12 @@ type Handler = { selector: string; handler: ElementHandlers }
 // Their content is text, so a wrapper tag inserted into it is never parsed as a tag
 const RAW_TEXT_ELEMENTS = new Set(['iframe', 'noembed', 'noframes', 'noscript', 'plaintext', 'script', 'style', 'textarea', 'title', 'xmp'])
 
+const INSERTIONS = ['prepend', 'append', 'before', 'after'] as const
+
+const withoutNested = (selector: string) => selector.replace(/"[^"]*"|'[^']*'|\[[^\]]*\]|\([^)]*\)/g, '')
+// One compound selector, so `${container} > ${marker}` only matches a direct child
+const isCompound = (selector: string) => !/[\s>+~,]/.test(withoutNested(selector.trim()))
+
 export type RangeWrapper = {
     componentKey: string
     /** Pass 1, ahead of every other component: split each container into `<tag>` segments. */
@@ -43,8 +49,18 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
     if (fromMarker && toMarker && fromMarker === toMarker) {
         return null
     }
-
     const container = behavior.metadata.cssSelector as string
+    if ((fromMarker && !isCompound(fromMarker)) || (toMarker && !isCompound(toMarker)) || withoutNested(container).includes(',')) {
+        return null
+    }
+    // Components ahead of the range whose inserts the element path places differently, or keeps where the wrapper cuts
+    const keys = Object.keys(decisions.componentBehaviors)
+    const inserting = keys
+        .slice(0, keys.indexOf(componentKey))
+        .map((key) => decisions.componentBehaviors[key])
+        .filter((b) => b?.metadata.cssSelector && INSERTIONS.some((key) => b.content?.[key]?.length))
+        .map((b) => b?.metadata.cssSelector as string)
+
     const tag = `mos-range-${Math.random().toString(36).slice(2, 10)}`
     const cut = `<${tag}>`
     const keep = `<${tag} data-keep>`
@@ -60,14 +76,24 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
     // Set by a `>` handler for the check on the same element, which runs after it
     let directStart = false
     let directEnd = false
+    // Cleared by the range's own check on the container, after the components ahead of it
+    let atContainer = false
+    // The rewriter mismatches the wrapper's end tags inside MathML
+    let mathDepth = 0
 
     const handlers: Handler[] = [
         {
-            // The rewriter mismatches the wrapper's end tags inside MathML
-            selector: `math ${container}`,
+            selector: 'math',
             handler: {
-                element() {
-                    unsupported = true
+                element(element: RewriterElement) {
+                    mathDepth++
+                    try {
+                        element.onEndTag?.(() => {
+                            mathDepth--
+                        })
+                    } catch {
+                        mathDepth--
+                    }
                 },
             },
         },
@@ -78,11 +104,11 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                     if (isVoidElement(element)) {
                         return
                     }
-                    const tagName = element.tagName.toLowerCase()
-                    if (!element.onEndTag || RAW_TEXT_ELEMENTS.has(tagName) || tagName === 'math' || depth > 0) {
+                    if (!element.onEndTag || RAW_TEXT_ELEMENTS.has(element.tagName.toLowerCase()) || mathDepth > 0 || depth > 0) {
                         unsupported = true
                         return
                     }
+                    atContainer = true
                     depth++
                     phase = fromMarker ? 'scanning' : 'open'
                     // Closed by the container's own end, so what other components append lands outside it
@@ -101,7 +127,16 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
             },
         },
     ]
-    const checks: Handler[] = []
+    const checks: Handler[] = [
+        {
+            selector: container,
+            handler: {
+                element() {
+                    atContainer = false
+                },
+            },
+        },
+    ]
 
     if (toMarker) {
         handlers.push({
@@ -163,6 +198,20 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                         directStart = false
                         unsupported ||= element.removed
                     } else if (phase === 'scanning') {
+                        unsupported = true
+                    }
+                },
+            },
+        })
+    }
+
+    // After the wrapper's own handlers, so they see its state for the same element
+    for (const selector of inserting) {
+        handlers.push({
+            selector,
+            handler: {
+                element() {
+                    if (atContainer || phase === 'open' || (phase === 'inStart' && directStart)) {
                         unsupported = true
                     }
                 },

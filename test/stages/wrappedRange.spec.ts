@@ -215,6 +215,26 @@ describe('range replacement by wrapper', () => {
             }
         })
 
+        it('when a marker selector has a combinator', async () => {
+            await expectsFallback('<div class="c"><h1>t</h1><section><p class="s">a</p><p>b</p></section><p>c</p></div>', '.c', {
+                fromMarker: 'section .s',
+            })
+        })
+
+        it('when the container selector names the MathML element', async () => {
+            await expectsFallback('<math><mi class="c"><p class="s">a</p>x</mi></math><p>z</p>', 'math > mi.c', { fromMarker: '.s' })
+        })
+
+        it('when a component before the range inserts content', async () => {
+            for (const [selector, content] of [
+                ['p.s', { after: [html('<u>O</u>')] }],
+                ['section', { before: [html('<u>O</u>')] }],
+            ] as const) {
+                const options = { others: { other: { selector, content } }, othersFirst: true }
+                await expectsFallback(page, '.c', { fromMarker: 'p.s', toMarker: 'hr.e' }, options)
+            }
+        })
+
         it('when the container selector is a list', async () => {
             await expectsFallback(`<p class="x">x</p>${page}`, '.x, .c', { fromMarker: 'p.s', toMarker: 'hr.e' })
         })
@@ -263,7 +283,6 @@ describe('range replacement by wrapper', () => {
             const options = pick<Options>([
                 {},
                 { others: { other: { selector: otherSelector, content: { remove: true } } }, othersFirst: rnd() < 0.5 },
-                // Only after the range: the element path keeps what an earlier component inserts next to an element it cuts
                 {
                     others: {
                         other: {
@@ -271,6 +290,7 @@ describe('range replacement by wrapper', () => {
                             content: { [pick(['append', 'prepend', 'before', 'after'])]: [html('<u>O</u>')] },
                         },
                     },
+                    othersFirst: rnd() < 0.5,
                 },
             ])
             const selector = pick(['.c', 'div', 'article', 'body'])
