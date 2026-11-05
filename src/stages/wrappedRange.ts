@@ -1,4 +1,4 @@
-import type { ElementHandlers, RewriterElement } from '../adapters/HtmlRewriterAdapter'
+import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
 import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 import { renderElement } from './elements'
@@ -56,6 +56,10 @@ export type RangeWrapper = {
     /** Pass 1 met a page the wrapper can't cut, so the caller must redo it element by element. */
     unsupported: () => boolean
     fail: () => void
+    /** Start markers pass 1 found nested in their container, each cut by `splice` before pass 2. */
+    nested: () => number
+    /** Cuts the ranges of nested start markers out of pass 1's output, or null when the page must be redone element by element. */
+    splice: (page: Uint8Array<ArrayBuffer>, rewriter: HtmlRewriterAdapter, headers: Headers) => Promise<Uint8Array<ArrayBuffer> | null>
 }
 
 type RangeState = {
@@ -65,14 +69,25 @@ type RangeState = {
     // Set by a `>` handler for the check on the same element, which runs after it
     directStart: boolean
     directEnd: boolean
+    // The start marker was nested, so the range is cut by `splice`
+    nested: boolean
+    // The container isn't HTML, so a fragment of it can't be parsed on its own
+    foreign: boolean
 }
+
+// Starts every sentinel; pages hardly ever hold it
+const MARK = 1
+const COMMENT_OPEN = 4
+const COMMENT_CLOSE = 3
 
 /**
  * Cuts each range by splitting its container into wrapper elements in one pass and removing the one that holds the
  * range in the next, so the cut costs one callback instead of one per element. The split only balances when both
- * markers are direct children of the outermost container; a nested marker makes the page unsupported. What other
- * components insert inside the cut is removed with it, and a marker removed by another component still marks the cut.
- * A container holding raw text, or inside `math`, is left alone.
+ * markers are direct children of the outermost container. A nested start marker of the only range instead gets
+ * sentinels around it and its replacement, and `splice` cuts the bytes from there to the end marker or the container's
+ * end, putting back the end tags of the elements the start marker sits in. Any other nested marker makes the page
+ * unsupported. What other components insert inside the cut is removed with it, and a marker removed by another
+ * component still marks the cut. A container holding raw text, or inside `math`, is left alone.
  */
 export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisionResponse): RangeWrapper | null => {
     const ranges = Object.entries(decisions.componentBehaviors).flatMap(([componentKey, behavior]) => {
@@ -101,41 +116,47 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
 
     let unsupported = false
     let wrapped = 0
+    let nested = 0
+    const sentinel = (index: number, kind: 'o' | 'c' | 's' | 'r' | 'e') => `${String.fromCharCode(MARK)}${nonce}-${index}-${kind}`
+    const comment = (index: number, kind: 's' | 'r' | 'e') => `<!--${sentinel(index, kind)}-->`
     // Ranges whose container handler has run for the current element, cleared once its marker handlers have run
     let atContainer = 0
-    // The rewriter mismatches the wrapper's end tags inside MathML
-    let mathDepth = 0
+    // Open `math` and `svg` elements. The rewriter mismatches the wrapper's end tags inside MathML, and `splice` reads
+    // the kept prefix as HTML, which misreads SVG's self-closing tags.
+    const foreign = { math: 0, svg: 0 }
+    const foreignTag = (element: RewriterElement) => {
+        const tag = element.tagName.toLowerCase()
+        return tag === 'math' || tag === 'svg' ? tag : null
+    }
 
-    // Only the last end tag callback registered on an element runs, so one registered on `math` keeps its count
+    // Only the last end tag callback registered on an element runs, so one registered on `math` or `svg` keeps its count
     const onEnd = (element: RewriterElement, callback: () => void) => {
-        const math = element.tagName.toLowerCase() === 'math'
+        const tag = foreignTag(element)
         element.onEndTag?.(
-            math
+            tag
                 ? () => {
-                      mathDepth--
+                      foreign[tag]--
                       callback()
                   }
                 : callback,
         )
     }
 
-    const handlers: Handler[] = [
-        {
-            selector: 'math',
-            handler: {
-                element(element: RewriterElement) {
-                    mathDepth++
-                    try {
-                        element.onEndTag?.(() => {
-                            mathDepth--
-                        })
-                    } catch {
-                        mathDepth--
-                    }
-                },
+    const handlers: Handler[] = (['math', 'svg'] as const).map((tag) => ({
+        selector: tag,
+        handler: {
+            element(element: RewriterElement) {
+                foreign[tag]++
+                try {
+                    element.onEndTag?.(() => {
+                        foreign[tag]--
+                    })
+                } catch {
+                    foreign[tag]--
+                }
             },
         },
-    ]
+    }))
     const markers: Handler[] = []
     const cleanups: Handler[] = []
     const unwrap: Handler[] = []
@@ -146,7 +167,8 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
         const cut = `<${tag}>`
         const keep = `<${tag} data-keep>`
         const close = `</${tag}>`
-        const state: RangeState = { depth: 0, phase: 'closed', directStart: false, directEnd: false }
+        const replacement = (replaceRange.replaceWith ?? []).map((item) => renderElement(ctx, item))
+        const state: RangeState = { depth: 0, phase: 'closed', directStart: false, directEnd: false, nested: false, foreign: false }
 
         handlers.push({
             selector: container,
@@ -173,7 +195,7 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                         }
                         return
                     }
-                    if (RAW_TEXT_ELEMENTS.has(element.tagName.toLowerCase()) || mathDepth > 0) {
+                    if (RAW_TEXT_ELEMENTS.has(element.tagName.toLowerCase()) || foreign.math > 0) {
                         return
                     }
                     try {
@@ -187,9 +209,12 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                     }
                     state.depth++
                     state.phase = fromMarker ? 'scanning' : 'open'
-                    // Closed by the container's own end, so what other components append lands outside it
-                    element.prepend(fromMarker ? keep : cut, html)
-                    element.append(close, html)
+                    state.nested = false
+                    state.foreign = foreign.svg > 0
+                    // Closed by the container's own end, so what other components append lands outside it. Sentinels
+                    // in the tags let `splice` find the container; pass 2 removes the tags with them.
+                    element.prepend(fromMarker ? `<${tag} data-keep ${sentinel(index, 'o')}>` : cut, html)
+                    element.append(fromMarker ? `</${tag} ${sentinel(index, 'c')}>` : close, html)
                     wrapped++
                 },
             },
@@ -227,7 +252,7 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                                 unsupported = true
                                 return
                             }
-                            element.before(close + keep, html)
+                            element.before(state.nested ? comment(index, 'e') : close + keep, html)
                             state.phase = 'closed'
                         },
                     },
@@ -253,11 +278,23 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                             if (state.phase !== 'scanning') {
                                 return
                             }
-                            if (!direct || atContainer) {
+                            // Another range's wrapper tags would come apart in the splice
+                            if (atContainer || (!direct && (ranges.length > 1 || state.foreign || foreign.math > 0))) {
                                 unsupported = true
                                 return
                             }
-                            element.after(close + cut, html)
+                            if (direct) {
+                                element.after(close + cut, html)
+                            } else {
+                                // Later `after` content lands closer to the element
+                                element.before(comment(index, 's'), html)
+                                element.after(comment(index, 'r'), html)
+                                for (const [content, options] of replacement.slice().reverse()) {
+                                    element.after(content, options)
+                                }
+                                state.nested = true
+                                nested++
+                            }
                             state.phase = 'inStart'
                             try {
                                 if (!element.onEndTag || isVoidElement(element)) {
@@ -276,7 +313,6 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
             )
         }
 
-        const replacement = (replaceRange.replaceWith ?? []).map((item) => renderElement(ctx, item))
         unwrap.push({
             selector: tag,
             handler: {
@@ -304,5 +340,119 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
         fail: () => {
             unsupported = true
         },
+        nested: () => nested,
+        splice: async (page, rewriter, headers) => {
+            // Only taken with one range, so every sentinel is that range's
+            const needle = new TextEncoder().encode(sentinel(0, 'o').slice(0, -1))
+            const find = searcher(needle)
+            const out: Uint8Array<ArrayBuffer>[] = []
+            let copyFrom = 0
+            let contentStart = -1
+            let closers: Uint8Array<ArrayBuffer> | null = null
+            let cutting = false
+            let cuts = 0
+            for (let at = find(page, 0); at !== -1; at = find(page, at + 1)) {
+                const kind = String.fromCharCode(page[at + needle.length] ?? 0)
+                const end = at + needle.length + 1
+                if (cutting) {
+                    if (kind === 'e') {
+                        copyFrom = end + COMMENT_CLOSE
+                    } else if (kind === 'c') {
+                        copyFrom = at - `</mos-range-${nonce}-0 `.length
+                    } else {
+                        return null
+                    }
+                    cutting = false
+                } else if (kind === 'o') {
+                    contentStart = end + 1
+                } else if (kind === 'c' && !closers) {
+                    contentStart = -1
+                } else if (kind === 's' && !closers && contentStart !== -1) {
+                    closers = await closingTags(rewriter, page.subarray(contentStart, at - COMMENT_OPEN), headers)
+                    if (!closers) {
+                        return null
+                    }
+                    out.push(page.subarray(copyFrom, at - COMMENT_OPEN))
+                    copyFrom = end + COMMENT_CLOSE
+                } else if (kind === 'r' && closers) {
+                    out.push(page.subarray(copyFrom, at - COMMENT_OPEN), closers)
+                    closers = null
+                    cutting = true
+                    cuts++
+                } else {
+                    // A sentinel lost with what another component removed, or out of order
+                    return null
+                }
+            }
+            if (cutting || closers || cuts !== nested) {
+                return null
+            }
+            out.push(page.subarray(copyFrom))
+            const spliced = new Uint8Array(out.reduce((length, chunk) => length + chunk.length, 0))
+            let offset = 0
+            for (const chunk of out) {
+                spliced.set(chunk, offset)
+                offset += chunk.length
+            }
+            return spliced
+        },
     }
+}
+
+/** Finds `needle` in a page, skipping ahead by up to its length on a mismatch rather than reading every byte. */
+const searcher = (needle: Uint8Array) => {
+    const last = needle.length - 1
+    const skip = new Uint8Array(256).fill(needle.length)
+    for (let i = 0; i < last; i++) {
+        skip[needle[i] ?? 0] = last - i
+    }
+    return (page: Uint8Array, from: number) => {
+        for (let at = from; at + last < page.length; at += skip[page[at + last] ?? 0] ?? 1) {
+            let i = last
+            while (i >= 0 && page[at + i] === needle[i]) {
+                i--
+            }
+            if (i < 0) {
+                return at
+            }
+        }
+        return -1
+    }
+}
+
+/** End tags for the elements still open at the end of `prefix`, innermost first; null if they can't be told. */
+const closingTags = async (rewriter: HtmlRewriterAdapter, prefix: Uint8Array<ArrayBuffer>, headers: Headers) => {
+    const open: { name: string }[] = []
+    let failed = false
+    const session = rewriter.create().on('*', {
+        element(element: RewriterElement) {
+            if (isVoidElement(element)) {
+                return
+            }
+            if (!element.onEndTag) {
+                failed = true
+                return
+            }
+            const entry = { name: element.tagName }
+            try {
+                // An end tag also closes the elements left open inside it
+                element.onEndTag(() => {
+                    const index = open.lastIndexOf(entry)
+                    if (index !== -1) {
+                        open.length = index
+                    }
+                })
+                open.push(entry)
+            } catch {
+                // Self-closing, so never open
+            }
+        },
+    })
+    await session.transform(new Response(prefix, { headers })).arrayBuffer()
+    const names = open.map(({ name }) => name).reverse()
+    // Written as ASCII, whatever the page's encoding
+    if (failed || !names.every((name) => /^[\x21-\x7e]+$/.test(name))) {
+        return null
+    }
+    return new TextEncoder().encode(names.map((name) => `</${name}>`).join(''))
 }

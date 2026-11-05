@@ -27,8 +27,11 @@ export default async function handleSurfaceComponents(
     headers.delete('content-length')
     const init = { status: response.status, statusText: response.statusText, headers }
     const wrapped = await applyComponents(ctx, new Response(page, init), surfaceDecisions, rewriter, wrapper)
-    const wrappedPage = await wrapped.arrayBuffer()
-    if (wrapper.unsupported()) {
+    let wrappedPage: Uint8Array<ArrayBuffer> | null = new Uint8Array(await wrapped.arrayBuffer())
+    if (!wrapper.unsupported() && wrapper.nested() > 0) {
+        wrappedPage = await wrapper.splice(wrappedPage, rewriter, headers)
+    }
+    if (wrapper.unsupported() || !wrappedPage) {
         return applyComponents(ctx, new Response(page, init), surfaceDecisions, rewriter, null)
     }
     if (wrapper.wrapped() === 0) {

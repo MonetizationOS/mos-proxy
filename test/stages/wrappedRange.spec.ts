@@ -54,8 +54,12 @@ const transform = async (body: string, decisions: SurfaceDecisionResponse, eleme
     const result = elementByElement
         ? await applyComponents(ctx, response, decisions, rewriter, null)
         : await handleSurfaceComponents(ctx, response, decisions, rewriter)
-    const path = elementByElement || !planRangeWrapper(ctx, decisions) ? 'elements' : rewriter.sessions > 2 ? 'fallback' : 'wrapper'
-    return { body: await result.text(), endTagCalls: rewriter.endTagCalls, path }
+    // Only the element path selects every element in a container
+    const fellBack = rewriter.selectors.some((selector) => selector.endsWith(' *'))
+    const path = elementByElement || !planRangeWrapper(ctx, decisions) ? 'elements' : fellBack ? 'fallback' : 'wrapper'
+    // A pass that selects every element finds the open elements around a nested start marker
+    const spliced = path === 'wrapper' && rewriter.selectors.includes('*')
+    return { body: await result.text(), endTagCalls: rewriter.endTagCalls, path, spliced }
 }
 
 /**
@@ -103,6 +107,7 @@ const wrapped = async (body: string, selector: string, range: Range, options?: O
 }
 
 const page = '<div class="c"><h1>t</h1><p class="s">a</p><p>b</p><section><p>c</p></section><hr class="e"><p>d</p></div><footer>f</footer>'
+const nested = '<div class="c"><h1>t</h1><section><div><p class="s">a</p><p>b</p></div><p>c</p></section><p>d</p></div><footer>f</footer>'
 
 describe('selector lists', () => {
     it('splits on top-level commas only', () => {
@@ -384,10 +389,6 @@ describe('range replacement by wrapper', () => {
             expect(endTagCalls.slice(-elementByElement.endTagCalls.length)).toEqual(elementByElement.endTagCalls)
         }
 
-        it('when the start marker is not a direct child of the container', async () => {
-            await expectsFallback('<div class="c"><section><p class="s">a</p><p>b</p></section><p>c</p></div>', '.c', { fromMarker: 'p.s' })
-        })
-
         it('when the end marker is not a direct child of the container', async () => {
             await expectsFallback('<div class="c"><p class="s">a</p><p>b</p><section><hr class="e"><p>c</p></section></div>', '.c', {
                 fromMarker: 'p.s',
@@ -395,11 +396,26 @@ describe('range replacement by wrapper', () => {
             })
         })
 
-        it('when a marker is a direct child of a nested container', async () => {
-            await expectsFallback('<div class="c"><p>a</p><div class="c"><p class="s">b</p><p>c</p></div></div>', '.c', {
-                fromMarker: 'p.s',
-            })
+        it('when the end marker is a direct child of a nested container', async () => {
             await expectsFallback('<div class="c"><p>a</p><div class="c"><hr class="e"><p>c</p></div></div>', '.c', { toMarker: 'hr.e' })
+        })
+
+        it('when the start marker is nested and the decision has another range', async () => {
+            const others = { second: { selector: 'footer', content: { replaceRange: {} } } }
+            await expectsFallback(nested, '.c', { fromMarker: 'p.s' }, { others })
+        })
+
+        it('when the start marker is nested in MathML', async () => {
+            await expectsFallback('<div class="c"><math><mi class="s">x</mi><mn>1</mn></math><p>b</p></div>', '.c', { fromMarker: '.s' })
+        })
+
+        it('when the start marker is nested in an SVG container', async () => {
+            await expectsFallback('<svg class="c"><g><path/><circle class="s"/></g><rect/></svg>', '.c', { fromMarker: '.s' })
+        })
+
+        it('when another component removes what holds a nested start marker', async () => {
+            const others = { section: { selector: 'section', content: { remove: true } } }
+            await expectsFallback(nested, '.c', { fromMarker: 'p.s' }, { others })
         })
 
         it('when a nested container is a marker', async () => {
@@ -417,6 +433,106 @@ describe('range replacement by wrapper', () => {
         })
     })
 
+    describe('nested start marker', () => {
+        const spliced = async (body: string, selector: string, range: Range, options?: Options) => {
+            const result = await bothWays(body, selector, range, options)
+            expect(result.path).toBe('wrapper')
+            expect(result.spliced).toBe(true)
+            return result
+        }
+
+        it('cuts to the end of the container, keeping the end tags of what holds the marker', async () => {
+            const { body, endTagCalls, elementByElement } = await spliced(nested, '.c', { fromMarker: 'p.s' })
+            expect(body).toBe('<div class="c"><h1>t</h1><section><div><p class="s">a</p><i>NEW</i></div></section></div><footer>f</footer>')
+            expect(elementByElement.endTagCalls.length).toBeGreaterThan(endTagCalls.length)
+        })
+
+        it('cuts up to an end marker that is a direct child', async () => {
+            const body = nested.replace('<p>d</p>', '<p>x</p><hr class="e"><p>d</p>')
+            const result = await spliced(body, '.c', { fromMarker: 'p.s', toMarker: 'hr.e' })
+            expect(result.body).toBe(
+                '<div class="c"><h1>t</h1><section><div><p class="s">a</p><i>NEW</i></div></section><hr class="e"><p>d</p></div><footer>f</footer>',
+            )
+        })
+
+        it('cuts after a void or self-closing start marker', async () => {
+            const { body } = await spliced('<div class="c"><div><img class="s"><p>b</p></div><p>c</p></div>', '.c', { fromMarker: '.s' })
+            expect(body).toBe('<div class="c"><div><img class="s"><i>NEW</i></div></div>')
+            const svg = await spliced('<div class="c"><svg><g><path class="s"/><circle/></g><rect/></svg><p>b</p></div>', '.c', {
+                fromMarker: '.s',
+            })
+            expect(svg.body).toBe('<div class="c"><svg><g><path class="s"/><i>NEW</i></g></svg></div>')
+        })
+
+        it('cuts each container', async () => {
+            const { body } = await spliced(`${nested}${nested}`, '.c', { fromMarker: 'p.s' })
+            const once = '<div class="c"><h1>t</h1><section><div><p class="s">a</p><i>NEW</i></div></section></div><footer>f</footer>'
+            expect(body).toBe(once + once)
+        })
+
+        it('cuts a page mixing nested and direct start markers', async () => {
+            const { body } = await spliced(`${page}${nested}`, '.c', { fromMarker: 'p.s' })
+            expect(body).toBe(
+                '<div class="c"><h1>t</h1><p class="s">a</p><i>NEW</i></div><footer>f</footer><div class="c"><h1>t</h1><section><div><p class="s">a</p><i>NEW</i></div></section></div><footer>f</footer>',
+            )
+        })
+
+        it('cuts in a nested container holding the start marker', async () => {
+            const body = '<div class="c"><p>a</p><div class="c"><p class="s">b</p><p>c</p></div><p>d</p></div>'
+            const result = await spliced(body, '.c', { fromMarker: 'p.s' })
+            expect(result.body).toBe('<div class="c"><p>a</p><div class="c"><p class="s">b</p><i>NEW</i></div></div>')
+        })
+
+        it('closes an ancestor whose end tag the page left out', async () => {
+            const body = '<div class="c"><p>a <b class="s">x</b> y<p>z</div><p>after</p>'
+            const { body: out, path } = await run(body, '.c', { fromMarker: '.s' })
+            expect(out).toBe('<div class="c"><p>a <b class="s">x</b><i>NEW</i></p></div><p>after</p>')
+            expect(path).toBe('wrapper')
+            // Removing the `p` left open also takes the end tag that closes it
+            expect((await run(body, '.c', { fromMarker: '.s' }, {}, true)).body).toBe(
+                '<div class="c"><p>a <b class="s">x</b><i>NEW</i><p>after</p>',
+            )
+        })
+
+        describe('other components', () => {
+            const around: Others = {
+                container: { selector: '.c', content: { prepend: [html('<b>P</b>')], append: [html('<b>A</b>')] } },
+                start: { selector: 'p.s', content: { before: [html('<u>B</u>')], after: [html('<u>F</u>')] } },
+                holder: {
+                    selector: 'section',
+                    content: {
+                        before: [html('<s>B</s>')],
+                        prepend: [html('<s>P</s>')],
+                        append: [html('<s>A</s>')],
+                        after: [html('<s>F</s>')],
+                    },
+                },
+            }
+
+            it('keep what they insert before the cut, and lose what they insert inside it', async () => {
+                for (const othersFirst of [false, true]) {
+                    const body = await wrapped(nested, '.c', { fromMarker: 'p.s' }, { others: around, othersFirst })
+                    expect(body).toBe(
+                        '<div class="c"><b>P</b><h1>t</h1><s>B</s><section><s>P</s><div><u>B</u><p class="s">a</p><u>F</u><i>NEW</i></div></section><b>A</b></div><footer>f</footer>',
+                    )
+                }
+            })
+
+            it('do not move the cut when they remove a marker', async () => {
+                const body = nested.replace('<p>d</p>', '<hr class="e"><p>d</p>')
+                for (const othersFirst of [false, true]) {
+                    const others = {
+                        start: { selector: 'p.s', content: { remove: true } },
+                        end: { selector: 'hr.e', content: { remove: true } },
+                    }
+                    expect(await wrapped(body, '.c', { fromMarker: 'p.s', toMarker: 'hr.e' }, { others, othersFirst })).toBe(
+                        '<div class="c"><h1>t</h1><section><div><i>NEW</i></div></section><p>d</p></div><footer>f</footer>',
+                    )
+                }
+            })
+        })
+    })
+
     it('cuts element by element when a marker selector has a combinator', async () => {
         const body = '<div class="c"><h1>t</h1><section><p class="s">a</p><p>b</p></section><p>c</p></div>'
         const { path } = await bothWays(body, '.c', { fromMarker: 'section .s' })
@@ -427,17 +543,26 @@ describe('range replacement by wrapper', () => {
         let seed = 7
         const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32
         const pick = <T>(items: readonly T[]): T => items[Math.floor(rnd() * items.length)] as T
-        const tree = (depth: number): string => {
+        let unclosed = false
+        // Left open, so the end tag of what holds it closes it. Never a start marker: one left open never gets what
+        // is inserted after it.
+        let openTags = ['p', 'li']
+        const tree = (depth: number, parent = ''): string => {
             let out = ''
             for (let i = 0, n = 1 + Math.floor(rnd() * 5); i < n; i++) {
                 const r = rnd()
-                if (r < 0.2) out += pick(['text ', 'a <b>b</b> ', '&amp; '])
+                const open = openTags.length ? pick(openTags) : parent
+                // In one of its own kind, the parent's end tag would close it and leave the parent open
+                if (i === n - 1 && depth > 0 && open !== parent && rnd() < 0.1) {
+                    unclosed = true
+                    out += `<${open}${rnd() < 0.4 ? ` class="${pick(['e', 'x'])}"` : ''}>${tree(depth - 1, open)}`
+                } else if (r < 0.2) out += pick(['text ', 'a <b>b</b> ', '&amp; '])
                 else if (r < 0.35) out += `<${pick(['img', 'br', 'hr', 'input'])}${rnd() < 0.4 ? ` class="${pick(['s', 'e', 'x'])}"` : ''}>`
                 else if (r < 0.4) out += `<svg><path class="${pick(['s', 'e'])}"/><link class="${pick(['s', 'e'])}"></link></svg>`
                 else if (depth > 0) {
                     const tag = pick(['div', 'p', 'span', 'section', 'ul', 'li', 'a', 'h2'])
                     const cls = pick(['s', 'e', 'x', 'c', ''])
-                    out += `<${tag}${cls ? ` class="${cls}"` : ''}>${tree(depth - 1)}</${tag}>`
+                    out += `<${tag}${cls ? ` class="${cls}"` : ''}>${tree(depth - 1, tag)}</${tag}>`
                 } else out += 'leaf '
             }
             return out
@@ -445,11 +570,20 @@ describe('range replacement by wrapper', () => {
         // No element any range selector matches, so the only container in MathML is the `mi`
         const mathTree = () => `<mo class="${pick(['s', 'e', 'x'])}">x</mo><mn>1</mn>`
         const insert = () => ({ [pick(['append', 'prepend', 'before', 'after'])]: [html('<u>O</u>')] })
-        const counts = { wrapper: 0, fallback: 0, elements: 0 }
+        /**
+         * A nested start marker's cut also takes what other components insert at the end of what holds it, and closes
+         * what holds it as the page reads with their inserts: one in `svg` takes the `path` after it out of SVG, where
+         * `<path/>` stays open. Where the page left an element open in the cut, the element path removing it also takes
+         * the end tag that closes it, so what is inserted at that end tag moves; the cut closes what was left open.
+         */
+        const afterReplacement = /(<i>NEW<\/i>)((?:<\/[a-z0-9]+>|<u>O<\/u>)*)/g
+        const normalized = (body: string, spliced: boolean) =>
+            (unclosed ? body.replaceAll('<u>O</u>', '') : body).replace(afterReplacement, (_, replacement: string, run: string) => {
+                const kept = spliced ? run.replaceAll('<u>O</u>', '').replaceAll('</path>', '') : run
+                return replacement + (unclosed ? kept.replace(/<\/[a-z0-9]+>/g, '') : kept)
+            })
+        const counts = { wrapper: 0, spliced: 0, fallback: 0, elements: 0 }
         for (let i = 0; i < 300; i++) {
-            const container = pick(['div', 'div', 'div', 'textarea', 'mi'])
-            const containerHtml = `<${container} class="c">${container === 'mi' ? mathTree() : tree(3)}</${container}>`
-            const body = `<body>${tree(2)}${container === 'mi' ? `<math>${containerHtml}</math>` : containerHtml}${rnd() < 0.3 ? `<article class="c">${tree(2)}</article>` : ''}${tree(1)}</body>`
             const range = {
                 fromMarker: pick([undefined, '.s', 'p', 'h2', 'img', 'h2, .s']),
                 toMarker: pick([undefined, undefined, '.e', 'hr', 'li']),
@@ -479,14 +613,30 @@ describe('range replacement by wrapper', () => {
             }
             const selector = pick(['.c', 'div', 'article', 'body', '.c, article', 'article, div', 'section, .c'])
             const decisions = decision(selector, range, options)
+            // Removing an element left open also removes what follows it up to the end tag that closes it
+            const removes = !!others.second || JSON.stringify(options).includes('"remove"')
+            unclosed = false
+            openTags = removes ? [] : range.fromMarker === 'p' ? ['li'] : ['p', 'li']
+            const container = pick(['div', 'div', 'div', 'textarea', 'mi'])
+            const containerHtml = `<${container} class="c">${container === 'mi' ? mathTree() : tree(3)}</${container}>`
+            const extraTag = pick(['article', 'div'])
+            const extra = rnd() < 0.3 ? `<${extraTag} class="c">${tree(2)}</${extraTag}>` : ''
+            const body = `<body>${tree(2)}${container === 'mi' ? `<math>${containerHtml}</math>` : containerHtml}${extra}${tree(1)}</body>`
+
             const result = await transform(body, decisions)
-            counts[result.path as keyof typeof counts]++
+            counts[result.spliced ? 'spliced' : (result.path as keyof typeof counts)]++
             const expected =
                 result.path === 'fallback'
                     ? (await transform(body, decisions, true)).body
                     : await expectedByElements(body, decisions, ':not(textarea):not(mi)')
-            expect(result.body, JSON.stringify({ body, selector, range, options, path: result.path })).toBe(expected)
+            const context = JSON.stringify({ body, selector, range, options, path: result.path, spliced: result.spliced })
+            if (result.path === 'wrapper' && (result.spliced || unclosed)) {
+                expect(normalized(result.body, result.spliced), context).toBe(normalized(expected, result.spliced))
+            } else {
+                expect(result.body, context).toBe(expected)
+            }
         }
-        expect(counts.wrapper).toBeGreaterThan(counts.fallback)
+        expect(counts.wrapper + counts.spliced).toBeGreaterThan(counts.fallback)
+        expect(counts.spliced).toBeGreaterThan(0)
     })
 })
