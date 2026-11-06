@@ -92,6 +92,7 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                             mathDepth--
                         })
                     } catch {
+                        // Self-closing `<math/>`, so nothing is inside it
                         mathDepth--
                     }
                 },
@@ -121,6 +122,7 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                             depth--
                         })
                     } catch {
+                        // Self-closing foreign element (`<path/>`), so there is no end tag to close the cut at
                         unsupported = true
                     }
                 },
@@ -176,15 +178,16 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                     element.after(close + cut, html)
                     directStart = true
                     phase = 'inStart'
+                    if (!element.onEndTag || isVoidElement(element)) {
+                        phase = 'open'
+                        return
+                    }
                     try {
-                        if (!element.onEndTag || isVoidElement(element)) {
+                        element.onEndTag(() => {
                             phase = 'open'
-                        } else {
-                            element.onEndTag(() => {
-                                phase = 'open'
-                            })
-                        }
+                        })
                     } catch {
+                        // Self-closing foreign element, so nothing is inside it
                         phase = 'open'
                     }
                 },
