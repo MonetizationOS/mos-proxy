@@ -1,4 +1,4 @@
-import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
+import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement, RewriterEndTag } from '../adapters/HtmlRewriterAdapter'
 import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 import { renderElement } from './elements'
@@ -67,17 +67,25 @@ export type RangeWrapper = {
     splice: (page: Uint8Array<ArrayBuffer>, rewriter: HtmlRewriterAdapter, headers: Headers) => Promise<Uint8Array<ArrayBuffer> | null>
 }
 
-type RangeState = {
-    depth: number
+type ContainerState = {
     // `inStart`: a start marker nested in the first one doesn't start the range again
     phase: 'scanning' | 'inStart' | 'open' | 'closed'
-    // Set by a `>` handler for the check on the same element, which runs after it
-    directStart: boolean
-    directEnd: boolean
     // The start marker was nested, so the range is cut by `splice`
     nested: boolean
     // The container isn't HTML, so a fragment of it can't be parsed on its own
     foreign: boolean
+}
+
+type RangeState = {
+    // Open containers, innermost last. A marker is the innermost one's, and a container nested in another is cut by
+    // its own range while the outer one cuts around it.
+    open: ContainerState[]
+    // Set by a `>` handler for the check on the same element, which runs after it
+    directStart: boolean
+    directEnd: boolean
+    directContainer: boolean
+    // The current element opened a container, so a marker on it is the next one out's
+    opened: boolean
 }
 
 // Starts every sentinel; pages hardly ever hold it
@@ -88,7 +96,8 @@ const COMMENT_CLOSE = 3
 /**
  * Cuts each range by splitting its container into wrapper elements in one pass and removing the one that holds the
  * range in the next, so the cut costs one callback instead of one per element. The split only balances when both
- * markers are direct children of the outermost container. A nested start marker of the only range instead gets
+ * markers are direct children of their container. A container nested in another one's cut must be a direct child of
+ * it, so the cut can close before it and reopen after. A nested start marker of the only range instead gets
  * sentinels around it and its replacement, and `splice` cuts the bytes from there to the end marker or the container's
  * end, putting back the end tags of the elements the start marker sits in. Any other nested marker makes the page
  * unsupported. What other components insert inside the cut is removed with it, and a marker removed by another
@@ -122,6 +131,8 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
     let unsupported = false
     let wrapped = 0
     let nested = 0
+    // Containers nested in another of their range's, which `splice` doesn't expect
+    let nestedContainers = 0
     const sentinel = (index: number, kind: 'o' | 'c' | 's' | 'r' | 'e') => `${String.fromCharCode(MARK)}${nonce}-${index}-${kind}`
     const comment = (index: number, kind: 's' | 'r' | 'e') => `<!--${sentinel(index, kind)}-->`
     // Ranges whose container handler has run for the current element, cleared once its marker handlers have run
@@ -135,13 +146,13 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
     }
 
     // Only the last end tag callback registered on an element runs, so one registered on `math` or `svg` keeps its count
-    const onEnd = (element: RewriterElement, callback: () => void) => {
+    const onEnd = (element: RewriterElement, callback: (endTag?: RewriterEndTag) => void) => {
         const tag = foreignTag(element)
         element.onEndTag?.(
             tag
-                ? () => {
+                ? (endTag) => {
                       foreign[tag]--
-                      callback()
+                      callback(endTag)
                   }
                 : callback,
         )
@@ -173,65 +184,89 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
         const cut = `<${tag}>`
         const keep = `<${tag} data-keep>`
         const close = `</${tag}>`
+        // Reopens a cut after a nested container, without a second replacement
+        const more = `<${tag} data-more>`
         const replacement = (replaceRange.replaceWith ?? []).map((item) => renderElement(ctx, item))
-        const state: RangeState = { depth: 0, phase: 'closed', directStart: false, directEnd: false, nested: false, foreign: false }
+        const state: RangeState = { open: [], directStart: false, directEnd: false, directContainer: false, opened: false }
+        const owner = () => state.open.at(state.opened ? -2 : -1)
 
-        handlers.push({
-            selector: container,
-            handler: {
-                element(element: RewriterElement) {
-                    // The same element holding two ranges would need two end tag callbacks
-                    unsupported ||= atContainer++ > 0
-                    if (isVoidElement(element)) {
-                        return
-                    }
-                    if (!element.onEndTag) {
-                        unsupported = true
-                        return
-                    }
-                    if (state.depth > 0) {
-                        // Only the outermost container is cut; counting this one marks the markers in it as nested
-                        try {
-                            onEnd(element, () => {
-                                state.depth--
-                            })
-                            state.depth++
-                        } catch {
-                            // No end tag, so nothing is nested in it
-                        }
-                        return
-                    }
-                    if (RAW_TEXT_ELEMENTS.has(element.tagName.toLowerCase()) || foreign.math > 0) {
-                        return
-                    }
-                    try {
-                        onEnd(element, () => {
-                            state.phase = 'closed'
-                            // Not a decrement: an inner container left open never runs its own callback
-                            state.depth = 0
-                        })
-                    } catch {
-                        // Self-closing foreign element (`<path/>`), so there is no end tag to close the cut at
-                        unsupported = true
-                        return
-                    }
-                    state.depth++
-                    state.phase = fromMarker ? 'scanning' : 'open'
-                    state.nested = false
-                    state.foreign = foreign.svg > 0
-                    // Closed by the container's own end, so what other components append lands outside it. Sentinels
-                    // in the tags let `splice` find the container; pass 2 removes the tags with them.
-                    element.prepend(fromMarker ? `<${tag} data-keep ${sentinel(index, 'o')}>` : cut, html)
-                    element.append(fromMarker ? `</${tag} ${sentinel(index, 'c')}>` : close, html)
-                    wrapped++
+        handlers.push(
+            {
+                selector: combineSelectors(container, ' > ', container),
+                handler: {
+                    element() {
+                        state.directContainer = true
+                    },
                 },
             },
-        })
+            {
+                selector: container,
+                handler: {
+                    element(element: RewriterElement) {
+                        // The same element holding two ranges would need two end tag callbacks
+                        unsupported ||= atContainer++ > 0
+                        const direct = state.directContainer
+                        state.directContainer = false
+                        // With no end tag there is nothing to cut in it, so a container it is in cuts it as any element
+                        if (isVoidElement(element)) {
+                            return
+                        }
+                        if (!element.onEndTag) {
+                            unsupported = true
+                            return
+                        }
+                        const outer = state.open.at(-1)
+                        const raw = RAW_TEXT_ELEMENTS.has(element.tagName.toLowerCase()) || foreign.math > 0
+                        if (outer && (raw || outer.nested || nested > 0)) {
+                            unsupported = true
+                            return
+                        }
+                        if (!outer && raw) {
+                            return
+                        }
+                        const index = state.open.length
+                        const tagName = element.tagName.toLowerCase()
+                        try {
+                            onEnd(element, (endTag) => {
+                                // A nested container closed by another element's end tag: the rewriter writes only one of
+                                // the containers' closing wrapper tags there, so they don't balance
+                                unsupported ||= index > 0 && endTag?.name.toLowerCase() !== tagName
+                                state.open.length = index
+                            })
+                        } catch {
+                            // Self-closing foreign element (`<path/>`): nothing to cut in it, and no end tag to close a cut at
+                            unsupported ||= !outer
+                            return
+                        }
+                        if (outer) {
+                            nestedContainers++
+                            if (outer.phase === 'open') {
+                                // Deeper in the cut, the cut can't close around it
+                                if (!direct) {
+                                    unsupported = true
+                                    return
+                                }
+                                element.before(close, html)
+                                element.after(more, html)
+                            }
+                        }
+                        state.open.push({ phase: fromMarker ? 'scanning' : 'open', nested: false, foreign: foreign.svg > 0 })
+                        state.opened = true
+                        // Closed by the container's own end, so what other components append lands outside it. Sentinels
+                        // in the tags let `splice` find the container; pass 2 removes the tags with them.
+                        element.prepend(fromMarker ? `<${tag} data-keep ${sentinel(index, 'o')}>` : cut, html)
+                        element.append(fromMarker ? `</${tag} ${sentinel(index, 'c')}>` : close, html)
+                        wrapped++
+                    },
+                },
+            },
+        )
         cleanups.push({
             selector: container,
             handler: {
                 element() {
                     atContainer = 0
+                    state.opened = false
                 },
             },
         })
@@ -242,7 +277,8 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                     selector: combineSelectors(container, ' > ', toMarker),
                     handler: {
                         element() {
-                            state.directEnd = state.depth === 1
+                            // Its parent is the innermost open container
+                            state.directEnd = true
                         },
                     },
                 },
@@ -252,16 +288,17 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                         element(element: RewriterElement) {
                             const direct = state.directEnd
                             state.directEnd = false
+                            const range = owner()
                             // Before the start marker, or inside it
-                            if (state.phase !== 'open') {
+                            if (range?.phase !== 'open') {
                                 return
                             }
                             if (!direct || atContainer) {
                                 unsupported = true
                                 return
                             }
-                            element.before(state.nested ? comment(index, 'e') : close + keep, html)
-                            state.phase = 'closed'
+                            element.before(range.nested ? comment(index, 'e') : close + keep, html)
+                            range.phase = 'closed'
                         },
                     },
                 },
@@ -273,7 +310,7 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                     selector: combineSelectors(container, ' > ', fromMarker),
                     handler: {
                         element() {
-                            state.directStart = state.depth === 1
+                            state.directStart = true
                         },
                     },
                 },
@@ -283,11 +320,12 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                         element(element: RewriterElement) {
                             const direct = state.directStart
                             state.directStart = false
-                            if (state.phase !== 'scanning') {
+                            const range = owner()
+                            if (range?.phase !== 'scanning') {
                                 return
                             }
-                            // Another range's wrapper tags would come apart in the splice
-                            if (atContainer || (!direct && (ranges.length > 1 || state.foreign || foreign.math > 0))) {
+                            // Another range's wrapper tags, or a nested container's, would come apart in the splice
+                            if (atContainer || (!direct && (ranges.length > 1 || nestedContainers > 0 || range.foreign || foreign.math > 0))) {
                                 unsupported = true
                                 return
                             }
@@ -300,21 +338,21 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                                 for (const [content, options] of replacement.slice().reverse()) {
                                     element.after(content, options)
                                 }
-                                state.nested = true
+                                range.nested = true
                                 nested++
                             }
-                            state.phase = 'inStart'
+                            range.phase = 'inStart'
                             if (!element.onEndTag || isVoidElement(element)) {
-                                state.phase = 'open'
+                                range.phase = 'open'
                                 return
                             }
                             try {
                                 onEnd(element, () => {
-                                    state.phase = 'open'
+                                    range.phase = 'open'
                                 })
                             } catch {
                                 // Self-closing foreign element, so nothing is inside it
-                                state.phase = 'open'
+                                range.phase = 'open'
                             }
                         },
                     },
@@ -328,6 +366,10 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                 element(element: RewriterElement) {
                     if (element.hasAttribute('data-keep')) {
                         element.removeAndKeepContent()
+                        return
+                    }
+                    if (element.hasAttribute('data-more')) {
+                        element.remove()
                         return
                     }
                     for (const [content, options] of replacement) {

@@ -360,19 +360,19 @@ describe('handleSurfaceComponents', () => {
             expect(body).toBe('<div class="c"><section><div class="s"><p class="s">a</p></div><i>NEW</i></section></div>')
         })
 
-        it('applies the range to the outermost of nested containers', async () => {
+        it('cuts a nested container by its own range and the outer one around it', async () => {
             const body = await replaceRange(
                 '<div class="c"><div class="c"><p class="s">a</p><p>b</p></div><p class="s">c</p><p>d</p></div><div class="c"><p class="s">e</p><p>f</p></div>',
                 { fromMarker: 'p.s' },
             )
             expect(body).toBe(
-                '<div class="c"><div class="c"><p class="s">a</p><i>NEW</i></div></div><div class="c"><p class="s">e</p><i>NEW</i></div>',
+                '<div class="c"><div class="c"><p class="s">a</p><i>NEW</i></div><p class="s">c</p><i>NEW</i></div><div class="c"><p class="s">e</p><i>NEW</i></div>',
             )
         })
 
-        it('replaces the whole outermost container when nested containers have no markers', async () => {
+        it('keeps a nested container in the cut, cut by its own range', async () => {
             const body = await replaceRange('<div class="c"><p>a</p><div class="c"><p>b</p></div><p>c</p></div>', {})
-            expect(body).toBe('<div class="c"><i>NEW</i></div>')
+            expect(body).toBe('<div class="c"><i>NEW</i><div class="c"><i>NEW</i></div></div>')
         })
 
         it('still cuts a later container after one removed by another component', async () => {
@@ -394,13 +394,15 @@ describe('handleSurfaceComponents', () => {
             expect(body).toBe('<div class="c"><p class="s">a</p><i>NEW</i></div>')
         })
 
-        it('applies the range to the outermost of nested containers matched by a descendant selector', async () => {
+        it('cuts nested containers matched by a descendant selector by their own ranges', async () => {
             const body = await replaceRange(
                 '<main><div class="c"><div class="c"><p class="s">a</p><p>b</p></div><p class="s">c</p><p>d</p></div></main>',
                 { fromMarker: 'p.s' },
                 'main .c',
             )
-            expect(body).toBe('<main><div class="c"><div class="c"><p class="s">a</p><i>NEW</i></div></div></main>')
+            expect(body).toBe(
+                '<main><div class="c"><div class="c"><p class="s">a</p><i>NEW</i></div><p class="s">c</p><i>NEW</i></div></main>',
+            )
         })
     })
 

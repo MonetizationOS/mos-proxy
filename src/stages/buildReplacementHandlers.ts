@@ -49,10 +49,11 @@ export const buildReplacementHandlers = (
 
     let elementCounter = 0
     let rangeIndex = -1
-    const states: ReplacementState[] = []
+    // Open containers, innermost last; each element is in the range of the innermost one. A removed container has no state.
+    const open: { state: ReplacementState | null; range: ComponentRange | undefined }[] = []
     const getCurrentState = () => {
-        const state = states[states.length - 1]
-        if (!state) {
+        const frame = open.at(-1)
+        if (!frame) {
             logger.log({
                 level: 'warn',
                 code: 'replacement-state-missing',
@@ -61,7 +62,7 @@ export const buildReplacementHandlers = (
             })
             return
         }
-        return state
+        return frame.state ?? undefined
     }
 
     const onChildElement = (element: RewriterElement) => {
@@ -71,7 +72,7 @@ export const buildReplacementHandlers = (
         }
 
         const state = getCurrentState()
-        const range = ranges[rangeIndex]
+        const range = open.at(-1)?.range
         const marker = range?.markers[elementCounter]
 
         if (state?.operation === 'SCANNING') {
@@ -102,29 +103,25 @@ export const buildReplacementHandlers = (
                 return
             }
 
+            // A nested container, or an element holding one, is kept for the nested container's own range
+            if (range && marker?.endTag && holdsIsland(range.islands, elementCounter, marker.endTag)) {
+                return
+            }
+
             element.remove()
             return
         }
     }
 
-    // Open containers; a container inside another one is part of the outer one's range
-    let depth = 0
-
     const parentHandler: ElementHandlers = {
         element(element: RewriterElement) {
-            if (depth > 0) {
-                return
-            }
             rangeIndex++
             // No content to cut
             if (isVoidElement(element)) {
                 return
             }
-            // A removed container still counts towards `depth`, so the ranges line up with the marker pass
+            // A removed container still opens a range, so the ranges line up with the marker pass
             const state: ReplacementState | null = element.removed ? null : { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
-            if (state) {
-                states.push(state)
-            }
 
             if (state?.operation === 'REMOVING') {
                 for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
@@ -132,18 +129,15 @@ export const buildReplacementHandlers = (
                     element.prepend(content, options)
                 }
             }
+            const index = open.length
+            // A self-closing foreign container (`<path/>`) has no end tag or content to cut. A container's end also
+            // closes containers left open in it.
             if (
                 onEnd(element, () => {
-                    depth--
-                    if (state) {
-                        states.pop()
-                    }
+                    open.length = index
                 })
             ) {
-                depth++
-            } else if (state) {
-                // A self-closing foreign container (`<path/>`) has no end tag or content to cut
-                states.pop()
+                open.push({ state, range: ranges[rangeIndex] })
             }
         },
 
@@ -159,5 +153,20 @@ export const buildReplacementHandlers = (
     if (!selector) {
         return null
     }
-    return { container: { selector, handler: parentHandler }, visitor: { open: () => depth > 0, child: onChildElement } }
+    return { container: { selector, handler: parentHandler }, visitor: { open: () => open.length > 0, child: onChildElement } }
+}
+
+/** Whether element `from` is a nested container or holds one: one starts from it to `to`, its last element. */
+const holdsIsland = (islands: number[], from: number, to: number) => {
+    let low = 0
+    let high = islands.length
+    while (low < high) {
+        const mid = (low + high) >> 1
+        if ((islands[mid] as number) < from) {
+            low = mid + 1
+        } else {
+            high = mid
+        }
+    }
+    return low < islands.length && (islands[low] as number) <= to
 }

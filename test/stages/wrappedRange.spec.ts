@@ -333,23 +333,92 @@ describe('range replacement by wrapper', () => {
     })
 
     describe('nested containers', () => {
-        it('cut only the outermost', async () => {
+        it('cut each by its own markers', async () => {
             const body = '<div class="c"><p>a</p><div class="c"><p>b</p></div><p class="s">c</p><p>d</p></div>'
             const { body: out, path } = await bothWays(body, '.c', { fromMarker: 'p.s' })
             expect(out).toBe('<div class="c"><p>a</p><div class="c"><p>b</p></div><p class="s">c</p><i>NEW</i></div>')
             expect(path).toBe('wrapper')
         })
 
-        it('cut only the outermost, holding a start marker in the math', async () => {
+        it('cut around one in the math', async () => {
             const body = '<div class="c"><math class="s"><mi class="c">x</mi></math><p>b</p></div>'
             const { body: out, path } = await bothWays(body, '.c', { fromMarker: '.s' })
             expect(out).toBe('<div class="c"><math class="s"><mi class="c">x</mi></math><i>NEW</i></div>')
+            expect(path).toBe('fallback')
+        })
+
+        it('cut element by element when an inner one is left without its end tag', async () => {
+            for (const [body, range, expected] of [
+                [
+                    '<ul class="c"><li class="c">x</ul><ul class="c"><li>y</li></ul>',
+                    {},
+                    '<ul class="c"><i>NEW</i><li class="c"><i>NEW</i></ul><ul class="c"><i>NEW</i></ul>',
+                ],
+                [
+                    '<div class="c"><p class="c">x</div><p>after</p>',
+                    { fromMarker: 'p.s' },
+                    '<div class="c"><p class="c">x</div><p>after</p>',
+                ],
+                [
+                    '<div class="c"><p class="c">x</div><div class="c"><p class="s">a</p>b</div>',
+                    { fromMarker: 'p.s' },
+                    '<div class="c"><p class="c">x</div><div class="c"><p class="s">a</p><i>NEW</i></div>',
+                ],
+                [
+                    '<ul class="c"><li class="c">x<li class="s">y</li><li>z</li></ul>',
+                    { fromMarker: '.s' },
+                    '<ul class="c"><li class="c">x<li class="s">y</li><i>NEW</i></ul>',
+                ],
+            ] as const) {
+                const { body: out, path } = await bothWays(body, '.c', range)
+                expect(out).toBe(expected)
+                expect(path).toBe('fallback')
+            }
+        })
+
+        it('cut around a direct child in the cut, which keeps its own replacement', async () => {
+            const { body, path } = await bothWays('<div class="c">x<div class="c">y<hr>z</div>w</div>', '.c', { toMarker: 'hr' })
+            expect(body).toBe('<div class="c"><i>NEW</i><div class="c"><i>NEW</i><hr>z</div></div>')
             expect(path).toBe('wrapper')
         })
 
-        it('still cut a later container after an inner one left without its end tag', async () => {
-            const body = '<ul class="c"><li class="c">x</ul><ul class="c"><li>y</li></ul>'
-            expect(await wrapped(body, '.c', {})).toBe('<ul class="c"><i>NEW</i></ul><ul class="c"><i>NEW</i></ul>')
+        it('cut by the markers directly in the nested one', async () => {
+            const { body, path } = await bothWays('<div class="c"><p>a</p><div class="c"><hr class="e"><p>c</p></div></div>', '.c', {
+                toMarker: 'hr.e',
+            })
+            expect(body).toBe('<div class="c"><i>NEW</i><div class="c"><i>NEW</i><hr class="e"><p>c</p></div></div>')
+            expect(path).toBe('wrapper')
+        })
+
+        it('cut a nested one holding the start marker, and leave the outer one', async () => {
+            const body = '<div class="c"><p>a</p><div class="c"><p class="s">b</p><p>c</p></div><p>d</p></div>'
+            const { body: out, path } = await bothWays(body, '.c', { fromMarker: 'p.s' })
+            expect(out).toBe('<div class="c"><p>a</p><div class="c"><p class="s">b</p><i>NEW</i></div><p>d</p></div>')
+            expect(path).toBe('wrapper')
+        })
+
+        it('cut a nested one deeper in what the outer one keeps', async () => {
+            const body =
+                '<div class="c"><section><div class="c"><p>y</p><p class="s">s</p><p>z</p></div></section><p class="s">a</p><p>b</p></div>'
+            const { body: out, path } = await bothWays(body, '.c', { fromMarker: 'p.s' })
+            expect(out).toBe(
+                '<div class="c"><section><div class="c"><p>y</p><p class="s">s</p><i>NEW</i></div></section><p class="s">a</p><i>NEW</i></div>',
+            )
+            expect(path).toBe('wrapper')
+        })
+
+        it('end the outer cut at a nested one that is its end marker', async () => {
+            const { body } = await bothWays('<div><p class="s">a</p>b <div class="e">c</div>d</div>', 'div', {
+                fromMarker: '.s',
+                toMarker: '.e',
+            })
+            expect(body).toBe('<div><p class="s">a</p><i>NEW</i><div class="e">c</div>d</div>')
+        })
+
+        it('keep what holds a nested one deeper in the cut, element by element', async () => {
+            const { body, path } = await bothWays('<div class="c">x<section>s<div class="c">y</div>t</section>w</div>', '.c', {})
+            expect(body).toBe('<div class="c"><i>NEW</i><section><div class="c"><i>NEW</i></div></section></div>')
+            expect(path).toBe('fallback')
         })
     })
 
@@ -429,10 +498,6 @@ describe('range replacement by wrapper', () => {
             })
         })
 
-        it('when the end marker is a direct child of a nested container', async () => {
-            await expectsFallback('<div class="c"><p>a</p><div class="c"><hr class="e"><p>c</p></div></div>', '.c', { toMarker: 'hr.e' })
-        })
-
         it('when the start marker is nested and the decision has another range', async () => {
             const others = { second: { selector: 'footer', content: { replaceRange: {} } } }
             await expectsFallback(nested, '.c', { fromMarker: 'p.s' }, { others })
@@ -510,12 +575,6 @@ describe('range replacement by wrapper', () => {
             )
         })
 
-        it('cuts in a nested container holding the start marker', async () => {
-            const body = '<div class="c"><p>a</p><div class="c"><p class="s">b</p><p>c</p></div><p>d</p></div>'
-            const result = await spliced(body, '.c', { fromMarker: 'p.s' })
-            expect(result.body).toBe('<div class="c"><p>a</p><div class="c"><p class="s">b</p><i>NEW</i></div></div>')
-        })
-
         it('closes an ancestor whose end tag the page left out', async () => {
             const body = '<div class="c"><p>a <b class="s">x</b> y<p>z</div><p>after</p>'
             const { body: out, path } = await run(body, '.c', { fromMarker: '.s' })
@@ -588,7 +647,7 @@ describe('range replacement by wrapper', () => {
                 // In one of its own kind, the parent's end tag would close it and leave the parent open
                 if (i === n - 1 && depth > 0 && open !== parent && rnd() < 0.1) {
                     unclosed = true
-                    out += `<${open}${rnd() < 0.4 ? ` class="${pick(['e', 'x'])}"` : ''}>${tree(depth - 1, open)}`
+                    out += `<${open}${rnd() < 0.4 ? ` class="${pick(['e', 'x', 'c'])}"` : ''}>${tree(depth - 1, open)}`
                 } else if (r < 0.2) out += pick(['text ', 'a <b>b</b> ', '&amp; '])
                 else if (r < 0.35) out += `<${pick(['img', 'br', 'hr', 'input'])}${rnd() < 0.4 ? ` class="${pick(['s', 'e', 'x'])}"` : ''}>`
                 else if (r < 0.4) out += `<svg><path class="${pick(['s', 'e'])}"/><link class="${pick(['s', 'e'])}"></link></svg>`

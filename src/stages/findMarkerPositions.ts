@@ -10,7 +10,12 @@ export type SurfaceMarkers = {
 }
 
 export type ComponentRange = {
+    /** By element number; an element in a nested container is in that container's range instead */
     markers: Marker[]
+    /** The element number before the container's first element */
+    start: number
+    /** Element numbers of the containers nested in this one, in order. The range cuts around them. */
+    islands: number[]
 }
 
 export type Marker = {
@@ -55,9 +60,10 @@ export const findMarkerPositions = async (
             }
             const { toMarker, fromMarker } = modification
             let elementCounter = 0
-            let currentRange: ComponentRange | null = null
-            // Open containers; a container inside another one is part of the outer one's range
-            let depth = 0
+            // Open containers, innermost last. Each element is in the range of the innermost one.
+            const open: ComponentRange[] = []
+            // The current element and the range it is in
+            let current: { range: ComponentRange; marker: Marker } | null = null
 
             const entries: (Handler | null)[] = [
                 {
@@ -65,18 +71,19 @@ export const findMarkerPositions = async (
                     componentKey,
                     handler: {
                         element: (element: RewriterElement) => {
-                            if (depth > 0) {
-                                return
-                            }
-                            currentRange = { markers: [] }
-                            markers[componentKey]?.push(currentRange)
-                            // With no end tag, nothing can be nested in it
+                            const range: ComponentRange = { markers: [], start: elementCounter, islands: [] }
+                            markers[componentKey]?.push(range)
+                            const index = open.length
+                            // With no end tag there is nothing to cut in it, so a container it is in cuts it as any element.
+                            // Its end also closes containers left open in it.
                             if (
                                 elements?.onEnd(element, () => {
-                                    depth--
+                                    open.length = index
                                 })
                             ) {
-                                depth++
+                                // Nested in another container, which cuts around it
+                                open.at(-1)?.islands.push(elementCounter)
+                                open.push(range)
                             }
                         },
                     },
@@ -87,20 +94,20 @@ export const findMarkerPositions = async (
                           componentKey,
                           handler: {
                               element() {
-                                  if (!currentRange) {
+                                  if (!current) {
                                       logInvalidState('to-marker', componentKey)
                                       return
                                   }
-                                  const marker = currentRange.markers[elementCounter]
-                                  if (marker) {
-                                      marker.endMarker = true
-                                  }
-                                  for (let i = elementCounter; i >= 1; i--) {
-                                      const m = currentRange.markers[i]
-                                      if (m && !m.nextEndMarker) {
-                                          m.nextEndMarker = elementCounter
-                                      } else {
+                                  const { range, marker } = current
+                                  marker.endMarker = true
+                                  for (let i = elementCounter; i > range.start; i--) {
+                                      // Missing where the element is in a nested container's range
+                                      const m = range.markers[i]
+                                      if (m?.nextEndMarker) {
                                           break
+                                      }
+                                      if (m) {
+                                          m.nextEndMarker = elementCounter
                                       }
                                   }
                               },
@@ -113,22 +120,20 @@ export const findMarkerPositions = async (
                           componentKey,
                           handler: {
                               element() {
-                                  if (!currentRange) {
+                                  if (!current) {
                                       logInvalidState('from-marker', componentKey)
                                       return
                                   }
-                                  const marker = currentRange.markers[elementCounter]
-                                  if (marker) {
-                                      marker.startMarker = true
-                                  }
+                                  current.marker.startMarker = true
                               },
                           },
                       }
                     : null,
             ]
             const visitor: RangeVisitor = {
-                open: () => depth > 0,
+                open: () => open.length > 0,
                 child(element: RewriterElement) {
+                    const currentRange = open.at(-1)
                     if (!currentRange) {
                         logInvalidState('child-element', componentKey)
                         return
@@ -141,6 +146,7 @@ export const findMarkerPositions = async (
                         nextEndMarker: null,
                     }
                     currentRange.markers[elementCounter] = marker
+                    current = { range: currentRange, marker }
                     if (
                         !elements?.onEnd(element, () => {
                             marker.endTag = elementCounter

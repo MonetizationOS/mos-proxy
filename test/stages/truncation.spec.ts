@@ -440,7 +440,7 @@ describe('range replacement on whole pages', () => {
 <p class="c1">REPLACEMENT<h2>SubTitle</h2> Second text</p>
 <p class="c2">REPLACEMENT<h3>SubTitle</h3><p class="c1">REPLACEMENT<h2>SubTitle</h2></p></p>
 <p class="c2">REPLACEMENT<h3>SubTitle</h3>Second text<p class="c1">REPLACEMENT<h2>SubTitle</h2>text</p></p>
-<p class="c2">REPLACEMENT<p class="c2"><h3>SubTitle</h3>Second text</p></p>
+<p class="c2">REPLACEMENT<p class="c2">REPLACEMENT<h3>SubTitle</h3>Second text</p></p>
 <p class="c3">PREPENDFirst text<h3>SubTitle</h3>REPLACEMENTAPPEND</p>AFTER
 APPEND</body>
 </html>`
