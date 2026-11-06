@@ -2,6 +2,7 @@ import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../a
 import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 import { isVoidElement } from './voidElements'
+import { combineSelectors } from './wrappedRange'
 
 export type SurfaceMarkers = {
     componentsWithInvalidSelectors: string[]
@@ -81,7 +82,7 @@ export const findMarkerPositions = async (
                     },
                 },
                 {
-                    selector: `${componentBehavior.metadata.cssSelector} *`,
+                    selector: combineSelectors(componentBehavior.metadata.cssSelector, ' ', '*'),
                     componentKey,
                     handler: {
                         element(element: RewriterElement) {
@@ -113,7 +114,7 @@ export const findMarkerPositions = async (
                 },
                 toMarker
                     ? {
-                          selector: `${componentBehavior.metadata.cssSelector} ${toMarker}`,
+                          selector: combineSelectors(componentBehavior.metadata.cssSelector, ' ', toMarker),
                           componentKey,
                           handler: {
                               element() {
@@ -139,7 +140,7 @@ export const findMarkerPositions = async (
                     : null,
                 fromMarker
                     ? {
-                          selector: `${componentBehavior.metadata.cssSelector} ${fromMarker}`,
+                          selector: combineSelectors(componentBehavior.metadata.cssSelector, ' ', fromMarker),
                           componentKey,
                           handler: {
                               element() {

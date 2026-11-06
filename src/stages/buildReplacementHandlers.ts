@@ -4,6 +4,7 @@ import type { SubSurfaceBehaviorApi } from '../types'
 import { renderElement } from './elements'
 import type { ComponentRange } from './findMarkerPositions'
 import { isVoidElement } from './voidElements'
+import { combineSelectors } from './wrappedRange'
 
 type ReplacementState = {
     // `IN_START`: a start marker nested in the first one doesn't start the range again
@@ -160,6 +161,6 @@ export const buildReplacementHandlers = (
     }
     return [
         { selector, handler: parentHandler },
-        { selector: `${selector} *`, handler: { element: onChildElement } },
+        { selector: combineSelectors(selector, ' ', '*'), handler: { element: onChildElement } },
     ]
 }
