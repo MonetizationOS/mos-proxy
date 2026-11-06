@@ -1,9 +1,10 @@
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
 import type { ComponentStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
-import { buildReplacementHandlers } from './buildReplacementHandlers'
+import { buildReplacementHandlers, type ReplacementHandlers } from './buildReplacementHandlers'
 import { ContentElementHandler } from './ContentElementHandler'
 import { findMarkerPositions } from './findMarkerPositions'
+import { createRangeElements, type RangeElements } from './rangeElements'
 import { planRangeWrapper, type RangeWrapper } from './wrappedRange'
 
 export default async function handleSurfaceComponents(
@@ -74,31 +75,28 @@ export async function applyComponents(
     // Ahead of every other component, so what they insert lands outside the wrapper
     registerWrapper(wrapper?.handlers ?? [])
 
-    Object.entries(surfaceDecisions.componentBehaviors).forEach(([componentKey, componentBehavior]) => {
-        if (!componentBehavior.metadata.cssSelector || !componentBehavior.content) {
-            return
+    let elements: RangeElements | null = null
+    const onEnd: RangeElements['onEnd'] = (element, callback) => elements?.onEnd(element, callback) ?? false
+    const components = Object.entries(surfaceDecisions.componentBehaviors).flatMap(([componentKey, componentBehavior]) => {
+        const selector = componentBehavior.metadata.cssSelector
+        if (!selector || !componentBehavior.content) {
+            return []
         }
 
-        if (componentBehavior.metadata.cssSelector.includes(':last-child')) {
+        if (selector.includes(':last-child')) {
             logger.log({
                 level: 'warn',
                 code: 'component-selector-unsupported',
                 message: 'Ignoring component with unsupported CSS selector.',
-                context: { componentKey, selector: componentBehavior.metadata.cssSelector },
+                context: { componentKey, selector },
             })
-            return
+            return []
         }
 
-        const handlers: { selector: string; handler: Parameters<typeof session.on>[1] }[] = [
-            {
-                selector: componentBehavior.metadata.cssSelector,
-                handler: new ContentElementHandler(ctx, componentBehavior.content),
-            },
-        ]
-
+        let range: ReplacementHandlers | null = null
         const cutByWrapper = wrapper?.componentKeys.includes(componentKey)
         if (supportsRangeReplacement && !cutByWrapper && !componentsWithInvalidSelectors.includes(componentKey)) {
-            handlers.push(...buildReplacementHandlers(ctx, componentBehavior, markers[componentKey]))
+            range = buildReplacementHandlers(ctx, componentBehavior, markers[componentKey], onEnd)
         } else if (!supportsRangeReplacement && componentBehavior.content.replaceRange) {
             logger.log({
                 level: 'warn',
@@ -106,6 +104,53 @@ export async function applyComponents(
                 message: 'Range replacement skipped: HTML rewriter adapter does not support onEndTag.',
                 context: { componentKey },
             })
+        }
+        return [{ componentKey, selector, content: componentBehavior.content, range }]
+    })
+
+    const ranged = components.flatMap(({ range }) => (range ? [range] : []))
+    if (ranged.length) {
+        elements = createRangeElements(
+            ranged.map(({ container }) => container.selector),
+            ranged.map(({ visitor }) => visitor),
+        )
+    }
+    // Registered with the first range component, so it starts each element before any range handler runs and
+    // components ahead of the ranges still see an element before a range removes it
+    let elementsRegistered = false
+    const registerElements = () => {
+        if (!elements || elementsRegistered) {
+            return
+        }
+        elementsRegistered = true
+        try {
+            session = session.on(elements.handler.selector, elements.handler.handler)
+            doRewrite = true
+        } catch (error) {
+            // The marker pass registered these selectors, so this is not expected
+            logger.log({
+                level: 'error',
+                code: 'component-transform-failed',
+                message: 'Failed to register range transforms; skipping range replacement.',
+                context: { selector: elements.handler.selector },
+                error,
+            })
+            elements = null
+        }
+    }
+
+    for (const { componentKey, selector: componentSelector, content, range } of components) {
+        if (range) {
+            registerElements()
+        }
+        const handlers: { selector: string; handler: Parameters<typeof session.on>[1] }[] = [
+            {
+                selector: componentSelector,
+                handler: new ContentElementHandler(ctx, content),
+            },
+        ]
+        if (range && elements) {
+            handlers.push(range.container)
         }
 
         for (const { selector, handler } of handlers) {
@@ -117,12 +162,12 @@ export async function applyComponents(
                     level: 'error',
                     code: 'component-transform-failed',
                     message: 'Failed to register component transform; skipping this handler.',
-                    context: { componentKey, selector: componentBehavior.metadata.cssSelector },
+                    context: { componentKey, selector: componentSelector },
                     error,
                 })
             }
         }
-    })
+    }
 
     if (config.injectScriptUrl) {
         const scriptUrl = config.injectScriptUrl
