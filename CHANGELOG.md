@@ -1,5 +1,13 @@
 # @monetizationos/proxy
 
+## 1.9.0
+
+### Minor Changes
+
+- [#43](https://github.com/MonetizationOS/mos-proxy/pull/43) [`f440059`](https://github.com/MonetizationOS/mos-proxy/commit/f440059bd2a09a3b0e67261aa10bcfb51d450133) Thanks [@benney](https://github.com/benney)! - Range replacement cuts the range with one callback instead of one per element when the start and end markers are direct children of the container. Other pages are cut element by element as before. `RewriterElement` now requires `removeAndKeepContent`, which lol-html and `HTMLRewriter` elements already implement. A page with a range is now buffered before it is rewritten, and HTML comments inside the cut range are removed with it.
+
+- [#45](https://github.com/MonetizationOS/mos-proxy/pull/45) [`74e9663`](https://github.com/MonetizationOS/mos-proxy/commit/74e96637385b01ea45e87338a52781b201eb4160) Thanks [@benney](https://github.com/benney)! - More pages use the one-callback range cut. Content other components insert inside the range is removed with it, whatever the component order, and a marker removed by another component still marks where the range starts or ends. A container holding raw text, such as `textarea` or `script`, is left alone, and only the outermost of nested containers is cut. Selector lists, several range components in one decision, and other content on the range component all use the one-callback path. Selector lists also apply per part when cutting element by element. A start marker nested inside its container now uses the one-callback path too, when its range is the only one in the decision.
+
 ## 1.8.1
 
 ### Patch Changes
