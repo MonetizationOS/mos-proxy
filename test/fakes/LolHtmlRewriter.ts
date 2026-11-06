@@ -134,8 +134,8 @@ const adaptElement = (element: WasmElement): RewriterElement => ({
         element.removeAndKeepContent()
     },
     onEndTag: (callback) => {
-        element.onEndTag(async () => {
-            await callback()
+        element.onEndTag(async (endTag) => {
+            await callback({ name: endTag.name })
         })
     },
 })

@@ -15,6 +15,7 @@ export type {
     Resource,
     ResourceProvider,
     RewriterElement,
+    RewriterEndTag,
     RewriterText,
     UnresolvedConfigContext,
     UnresolvedConfigHandler,
