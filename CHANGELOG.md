@@ -1,5 +1,16 @@
 # @monetizationos/proxy
 
+## 1.8.1
+
+### Patch Changes
+
+- [#42](https://github.com/MonetizationOS/mos-proxy/pull/42) [`6d1d24f`](https://github.com/MonetizationOS/mos-proxy/commit/6d1d24fc4a40df2f3b5e437bea38330fce0461db) Thanks [@benney](https://github.com/benney)! - Range replacement fixes:
+
+  - Uses less CPU on pages with many void elements (`img`, `br`, `meta`, ...). Output is unchanged.
+  - A range container with no end tag (`img`, or a self-closing SVG element such as `<path/>`) is left as it is instead of failing the whole page transform.
+  - A range starts at the first start marker, so a start marker nested inside it no longer inserts the replacement a second time.
+  - A range applies to the outermost matching container. A container nested inside another one is part of the outer container's cut.
+
 ## 1.8.0
 
 ### Minor Changes
