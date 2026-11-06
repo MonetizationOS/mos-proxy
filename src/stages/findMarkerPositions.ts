@@ -1,6 +1,7 @@
 import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
 import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
+import { isVoidElement } from './voidElements'
 
 export type SurfaceMarkers = {
     componentsWithInvalidSelectors: string[]
@@ -52,15 +53,30 @@ export const findMarkerPositions = async (
             const { toMarker, fromMarker } = modification
             let elementCounter = 0
             let currentRange: ComponentRange | null = null
+            // Open containers; a container inside another one is part of the outer one's range
+            let depth = 0
 
             const entries: (Handler | null)[] = [
                 {
                     selector: `${componentBehavior.metadata.cssSelector}`,
                     componentKey,
                     handler: {
-                        element: () => {
+                        element: (element: RewriterElement) => {
+                            if (depth > 0) {
+                                return
+                            }
                             currentRange = { markers: [] }
                             markers[componentKey]?.push(currentRange)
+                            if (element.onEndTag && !isVoidElement(element)) {
+                                try {
+                                    element.onEndTag(() => {
+                                        depth--
+                                    })
+                                    depth++
+                                } catch {
+                                    // No end tag, so nothing can be nested in it
+                                }
+                            }
                         },
                     },
                 },
@@ -81,7 +97,7 @@ export const findMarkerPositions = async (
                                 nextEndMarker: null,
                             }
                             currentRange.markers[elementCounter] = marker
-                            if (element.onEndTag) {
+                            if (element.onEndTag && !isVoidElement(element)) {
                                 try {
                                     element.onEndTag(() => {
                                         marker.endTag = elementCounter

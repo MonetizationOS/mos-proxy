@@ -3,9 +3,11 @@ import type { HtmlStageContext } from '../context'
 import type { SubSurfaceBehaviorApi } from '../types'
 import { renderElement } from './elements'
 import type { ComponentRange } from './findMarkerPositions'
+import { isVoidElement } from './voidElements'
 
 type ReplacementState = {
-    operation: 'SCANNING' | 'REMOVING' | 'REPLACED'
+    // `IN_START`: a start marker nested in the first one doesn't start the range again
+    operation: 'SCANNING' | 'IN_START' | 'REMOVING' | 'REPLACED'
 }
 
 export type ReplacementHandler = { selector: string; handler: ElementHandlers }
@@ -69,7 +71,8 @@ export const buildReplacementHandlers = (
                     const [content, options] = renderElement(ctx, after)
                     element.after(content, options)
                 }
-                if (element.onEndTag) {
+                state.operation = 'IN_START'
+                if (element.onEndTag && !isVoidElement(element)) {
                     try {
                         element.onEndTag(() => {
                             state.operation = 'REMOVING'
@@ -99,27 +102,47 @@ export const buildReplacementHandlers = (
         }
     }
 
+    // Open containers; a container inside another one is part of the outer one's range
+    let depth = 0
+
     const parentHandler: ElementHandlers = {
         element(element: RewriterElement) {
-            rangeIndex++
-            if (element.removed) {
+            if (depth > 0) {
                 return
             }
-
-            const state: ReplacementState = { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
-            states.push(state)
-
-            if (state.operation === 'REMOVING') {
-                for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
-                    const [content, options] = renderElement(ctx, prepend)
-                    element.prepend(content, options)
-                }
+            rangeIndex++
+            // No content to cut
+            if (isVoidElement(element)) {
+                return
+            }
+            // A removed container still counts towards `depth`, so the ranges line up with the marker pass
+            const state: ReplacementState | null = element.removed ? null : { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
+            if (state) {
+                states.push(state)
             }
 
-            if (element.onEndTag) {
-                element.onEndTag(() => {
+            try {
+                if (state?.operation === 'REMOVING') {
+                    for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
+                        const [content, options] = renderElement(ctx, prepend)
+                        element.prepend(content, options)
+                    }
+                }
+
+                if (element.onEndTag) {
+                    element.onEndTag(() => {
+                        depth--
+                        if (state) {
+                            states.pop()
+                        }
+                    })
+                    depth++
+                }
+            } catch {
+                // `onEndTag` throws on a self-closing foreign container (`<path/>`), which has no end tag or content to cut
+                if (state) {
                     states.pop()
-                })
+                }
             }
         },
 
