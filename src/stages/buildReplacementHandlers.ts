@@ -3,8 +3,8 @@ import type { HtmlStageContext } from '../context'
 import type { SubSurfaceBehaviorApi } from '../types'
 import { renderElement } from './elements'
 import type { ComponentRange } from './findMarkerPositions'
+import type { RangeElements, RangeVisitor } from './rangeElements'
 import { isVoidElement } from './voidElements'
-import { combineSelectors } from './wrappedRange'
 
 type ReplacementState = {
     // `IN_START`: a start marker nested in the first one doesn't start the range again
@@ -13,20 +13,28 @@ type ReplacementState = {
 
 export type ReplacementHandler = { selector: string; handler: ElementHandlers }
 
+export type ReplacementHandlers = {
+    container: ReplacementHandler
+    /** Visits each element in a container, from the shared handler */
+    visitor: RangeVisitor
+}
+
 /**
  * Requires a prior pass by `findMarkerPositions` to populate `ranges`. Depends on
  * `element.onEndTag` to detect element boundaries — on adapters without `capabilities.onEndTag`,
- * the caller should skip this step.
+ * the caller should skip this step. The `visitor` runs from a `createRangeElements` handler,
+ * which also provides `onEnd`.
  */
 export const buildReplacementHandlers = (
     ctx: HtmlStageContext,
     subSurface: SubSurfaceBehaviorApi,
     ranges: ComponentRange[] | undefined,
-): ReplacementHandler[] => {
+    onEnd: RangeElements['onEnd'],
+): ReplacementHandlers | null => {
     const { logger } = ctx
     const modification = subSurface.content?.replaceRange
     if (!modification || !ranges) {
-        return []
+        return null
     }
 
     if (modification.fromMarker && modification.toMarker && modification.fromMarker === modification.toMarker) {
@@ -36,7 +44,7 @@ export const buildReplacementHandlers = (
             message: 'Range replacement skipped: fromMarker and toMarker are identical.',
             context: { marker: modification.fromMarker, selector: subSurface.metadata.cssSelector },
         })
-        return []
+        return null
     }
 
     let elementCounter = 0
@@ -73,15 +81,11 @@ export const buildReplacementHandlers = (
                     element.after(content, options)
                 }
                 state.operation = 'IN_START'
-                if (element.onEndTag && !isVoidElement(element)) {
-                    try {
-                        element.onEndTag(() => {
-                            state.operation = 'REMOVING'
-                        })
-                    } catch {
+                if (
+                    !onEnd(element, () => {
                         state.operation = 'REMOVING'
-                    }
-                } else {
+                    })
+                ) {
                     state.operation = 'REMOVING'
                 }
             }
@@ -122,28 +126,24 @@ export const buildReplacementHandlers = (
                 states.push(state)
             }
 
-            try {
-                if (state?.operation === 'REMOVING') {
-                    for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
-                        const [content, options] = renderElement(ctx, prepend)
-                        element.prepend(content, options)
+            if (state?.operation === 'REMOVING') {
+                for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
+                    const [content, options] = renderElement(ctx, prepend)
+                    element.prepend(content, options)
+                }
+            }
+            if (
+                onEnd(element, () => {
+                    depth--
+                    if (state) {
+                        states.pop()
                     }
-                }
-
-                if (element.onEndTag) {
-                    element.onEndTag(() => {
-                        depth--
-                        if (state) {
-                            states.pop()
-                        }
-                    })
-                    depth++
-                }
-            } catch {
-                // `onEndTag` throws on a self-closing foreign container (`<path/>`), which has no end tag or content to cut
-                if (state) {
-                    states.pop()
-                }
+                })
+            ) {
+                depth++
+            } else if (state) {
+                // A self-closing foreign container (`<path/>`) has no end tag or content to cut
+                states.pop()
             }
         },
 
@@ -157,10 +157,7 @@ export const buildReplacementHandlers = (
 
     const selector = subSurface.metadata.cssSelector
     if (!selector) {
-        return []
+        return null
     }
-    return [
-        { selector, handler: parentHandler },
-        { selector: combineSelectors(selector, ' ', '*'), handler: { element: onChildElement } },
-    ]
+    return { container: { selector, handler: parentHandler }, visitor: { open: () => depth > 0, child: onChildElement } }
 }

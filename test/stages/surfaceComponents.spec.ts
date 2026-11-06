@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
 import type { MOSProxyLogEvent, MOSProxyLogger } from '../../src/logger'
-import handleSurfaceComponents from '../../src/stages/surfaceComponents'
+import handleSurfaceComponents, { applyComponents } from '../../src/stages/surfaceComponents'
 import type { MOSConfigInput, SubSurfaceBehaviorApi, SurfaceDecisionResponse } from '../../src/types'
 import { LolHtmlRewriter } from '../fakes/LolHtmlRewriter'
 
@@ -401,6 +401,42 @@ describe('handleSurfaceComponents', () => {
                 'main .c',
             )
             expect(body).toBe('<main><div class="c"><div class="c"><p class="s">a</p><i>NEW</i></div></div></main>')
+        })
+    })
+
+    describe('several range components cut element by element', () => {
+        type Range = { fromMarker?: string; toMarker?: string }
+        const range = (cssSelector: string, marker: Range, content: string): SubSurfaceBehaviorApi => ({
+            metadata: { cssSelector },
+            content: { replaceRange: { ...marker, replaceWith: [{ type: 'html', content }] } },
+        })
+        const cut = async (body: string, ranges: Record<string, SubSurfaceBehaviorApi>) =>
+            (await applyComponents(baseCtx, html(body), decisions(ranges), new LolHtmlRewriter(), null)).text()
+        const a = (marker: Range) => range('.a', marker, '<i>A</i>')
+        const b = (marker: Range) => range('.b', marker, '<i>B</i>')
+
+        it('cuts a container in another range container, and the ones after it', async () => {
+            const container = '<div class="a"><p>x</p><hr><p>y</p></div>'
+            const body = await cut(`<div class="b">${container}<h3>t</h3>${container}</div>${container}`, {
+                a: a({ toMarker: 'hr' }),
+                b: b({ toMarker: 'h3' }),
+            })
+            const kept = '<div class="a"><i>A</i><hr><p>y</p></div>'
+            expect(body).toBe(`<div class="b"><i>B</i><h3>t</h3>${kept}</div>${kept}`)
+        })
+
+        it('cuts every container that is also the container of another range', async () => {
+            const container = '<div class="a"><p>x</p><hr><p>y</p><h3>t</h3><p>z</p></div>'
+            const body = await cut(container + container, { a: a({ toMarker: 'hr' }), b: range('div', { fromMarker: 'h3' }, '<i>B</i>') })
+            const both = '<div class="a"><i>A</i><hr><p>y</p><h3>t</h3><i>B</i></div>'
+            expect(body).toBe(both + both)
+        })
+
+        it('cuts after a start marker that is the container of another range, in either order', async () => {
+            const page = '<div class="a"><p>x</p><div class="s b"><p>y</p><h3>t</h3><p>z</p></div><p>w</p></div>'
+            const expected = '<div class="a"><p>x</p><div class="s b"><i>B</i><h3>t</h3><p>z</p></div><i>A</i></div>'
+            expect(await cut(page, { a: a({ fromMarker: '.s' }), b: b({ toMarker: 'h3' }) })).toBe(expected)
+            expect(await cut(page, { b: b({ toMarker: 'h3' }), a: a({ fromMarker: '.s' }) })).toBe(expected)
         })
     })
 
