@@ -115,6 +115,16 @@ describe('selector lists', () => {
         expect(splitSelectorList("[data-x='a\\'s,'], .b")).toEqual(["[data-x='a\\'s,']", '.b'])
     })
 
+    it('splits whatever the whitespace around the commas', () => {
+        expect(splitSelectorList('.a,.b')).toEqual(['.a', '.b'])
+        expect(splitSelectorList('  .a   ,\n\t.b  ')).toEqual(['.a', '.b'])
+    })
+
+    it('keeps a list with an empty part invalid', () => {
+        expect(combineSelectors('.a,', ' ', 'p')).toBe('.a, p')
+        expect(combineSelectors('.a', ' > ', 'p,,hr')).toBe('.a > p,,hr')
+    })
+
     it('combines every part of both sides', () => {
         expect(combineSelectors('.a, .b', ' > ', 'p, hr')).toBe('.a > p, .a > hr, .b > p, .b > hr')
     })
@@ -350,6 +360,24 @@ describe('range replacement by wrapper', () => {
             '<section class="x"><p class="s">a</p><i>NEW</i></section><div class="c"><h1>t</h1><p class="s">a</p><i>NEW</i><hr class="e"><p>d</p></div><footer>f</footer>',
         )
         expect(path).toBe('wrapper')
+    })
+
+    it.each(['.x,.c', '.x   ,   .c'])('cuts each container of the selector list %j', async (selector) => {
+        const body = `<section class="x"><p class="s">a</p><p>b</p></section>${page}`
+        const { body: out, path } = await bothWays(body, selector, { fromMarker: 'p.x,p.s', toMarker: 'hr.e   ,   hr.x' })
+        expect(out).toBe(
+            '<section class="x"><p class="s">a</p><i>NEW</i></section><div class="c"><h1>t</h1><p class="s">a</p><i>NEW</i><hr class="e"><p>d</p></div><footer>f</footer>',
+        )
+        expect(path).toBe('wrapper')
+    })
+
+    it.each([
+        ['.x,,.c', 'p.s'],
+        ['.c,', 'p.s'],
+        ['.c', 'p.s,'],
+    ])('leaves the page alone when a selector list has an empty part (%j, %j)', async (selector, fromMarker) => {
+        const { body } = await bothWays(page, selector, { fromMarker })
+        expect(body).toBe(page)
     })
 
     it('starts the range at the first marker of a list', async () => {

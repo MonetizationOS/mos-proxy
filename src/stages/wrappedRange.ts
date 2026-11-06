@@ -41,10 +41,15 @@ export const splitSelectorList = (selector: string): string[] => {
 }
 
 /** `${container}${combinator}${inner}` for every pair of parts, so a list on either side keeps the combinator. */
-export const combineSelectors = (container: string, combinator: ' ' | ' > ', inner: string) =>
-    splitSelectorList(container)
-        .flatMap((outer) => splitSelectorList(inner).map((part) => `${outer}${combinator}${part}`))
-        .join(', ')
+export const combineSelectors = (container: string, combinator: ' ' | ' > ', inner: string) => {
+    const outers = splitSelectorList(container)
+    const inners = splitSelectorList(inner)
+    // An empty part (`.a,,.b`, `.a,`) is invalid; kept as is so the rewriter still rejects it
+    if (outers.includes('') || inners.includes('')) {
+        return `${container}${combinator}${inner}`
+    }
+    return outers.flatMap((outer) => inners.map((part) => `${outer}${combinator}${part}`)).join(', ')
+}
 
 export type RangeWrapper = {
     componentKeys: string[]
