@@ -152,6 +152,7 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                         foreign[tag]--
                     })
                 } catch {
+                    // Self-closing, so nothing is inside it
                     foreign[tag]--
                 }
             },
@@ -205,6 +206,7 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                             state.depth = 0
                         })
                     } catch {
+                        // Self-closing foreign element (`<path/>`), so there is no end tag to close the cut at
                         unsupported = true
                         return
                     }
@@ -297,15 +299,16 @@ export const planRangeWrapper = (ctx: HtmlStageContext, decisions: SurfaceDecisi
                                 nested++
                             }
                             state.phase = 'inStart'
+                            if (!element.onEndTag || isVoidElement(element)) {
+                                state.phase = 'open'
+                                return
+                            }
                             try {
-                                if (!element.onEndTag || isVoidElement(element)) {
+                                onEnd(element, () => {
                                     state.phase = 'open'
-                                } else {
-                                    onEnd(element, () => {
-                                        state.phase = 'open'
-                                    })
-                                }
+                                })
                             } catch {
+                                // Self-closing foreign element, so nothing is inside it
                                 state.phase = 'open'
                             }
                         },
