@@ -1,7 +1,7 @@
 import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
 import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
-import { isVoidElement } from './voidElements'
+import { createRangeElements, type RangeElements, type RangeVisitor } from './rangeElements'
 import { combineSelectors } from './wrappedRange'
 
 export type SurfaceMarkers = {
@@ -21,6 +21,7 @@ export type Marker = {
 }
 
 type Handler = { selector: string; componentKey: string; handler: ElementHandlers }
+type ComponentHandlers = { componentKey: string; container: string; visitor: RangeVisitor; handlers: Handler[] }
 
 /**
  * For any modifications with start or end markers, find the positions of those markers.
@@ -45,7 +46,8 @@ export const findMarkerPositions = async (
         Object.entries(surfaceDecisions.componentBehaviors).map(([key]) => [key, []]),
     )
 
-    const handlers: Handler[] = Object.entries(surfaceDecisions.componentBehaviors).flatMap<Handler>(
+    let elements: RangeElements | null = null
+    const components: ComponentHandlers[] = Object.entries(surfaceDecisions.componentBehaviors).flatMap<ComponentHandlers>(
         ([componentKey, componentBehavior]) => {
             const modification = componentBehavior.content?.replaceRange
             if (!componentBehavior.metadata?.cssSelector || !modification) {
@@ -68,46 +70,13 @@ export const findMarkerPositions = async (
                             }
                             currentRange = { markers: [] }
                             markers[componentKey]?.push(currentRange)
-                            if (element.onEndTag && !isVoidElement(element)) {
-                                try {
-                                    element.onEndTag(() => {
-                                        depth--
-                                    })
-                                    depth++
-                                } catch {
-                                    // No end tag, so nothing can be nested in it
-                                }
-                            }
-                        },
-                    },
-                },
-                {
-                    selector: combineSelectors(componentBehavior.metadata.cssSelector, ' ', '*'),
-                    componentKey,
-                    handler: {
-                        element(element: RewriterElement) {
-                            if (!currentRange) {
-                                logInvalidState('child-element', componentKey)
-                                return
-                            }
-                            ++elementCounter
-                            const marker: Marker = {
-                                endMarker: false,
-                                startMarker: false,
-                                endTag: null,
-                                nextEndMarker: null,
-                            }
-                            currentRange.markers[elementCounter] = marker
-                            if (element.onEndTag && !isVoidElement(element)) {
-                                try {
-                                    element.onEndTag(() => {
-                                        marker.endTag = elementCounter
-                                    })
-                                } catch {
-                                    marker.endTag = elementCounter
-                                }
-                            } else {
-                                marker.endTag = elementCounter
+                            // With no end tag, nothing can be nested in it
+                            if (
+                                elements?.onEnd(element, () => {
+                                    depth--
+                                })
+                            ) {
+                                depth++
                             }
                         },
                     },
@@ -157,29 +126,93 @@ export const findMarkerPositions = async (
                       }
                     : null,
             ]
-            return entries.filter((e): e is Handler => !!e)
+            const visitor: RangeVisitor = {
+                open: () => depth > 0,
+                child(element: RewriterElement) {
+                    if (!currentRange) {
+                        logInvalidState('child-element', componentKey)
+                        return
+                    }
+                    ++elementCounter
+                    const marker: Marker = {
+                        endMarker: false,
+                        startMarker: false,
+                        endTag: null,
+                        nextEndMarker: null,
+                    }
+                    currentRange.markers[elementCounter] = marker
+                    if (
+                        !elements?.onEnd(element, () => {
+                            marker.endTag = elementCounter
+                        })
+                    ) {
+                        marker.endTag = elementCounter
+                    }
+                },
+            }
+            return [
+                {
+                    componentKey,
+                    container: componentBehavior.metadata.cssSelector,
+                    visitor,
+                    handlers: entries.filter((e): e is Handler => !!e),
+                },
+            ]
         },
     )
 
-    if (!handlers.length || !response.body) {
+    if (!components.length || !response.body) {
         return { markers, componentsWithInvalidSelectors: [] }
     }
 
     const componentsWithInvalidSelectors: string[] = []
-    let session = rewriter.create()
-    for (const { selector, handler, componentKey } of handlers) {
-        try {
-            session = session.on(selector, handler)
-        } catch (error) {
-            ctx.logger.log({
-                level: 'error',
-                code: 'marker-pass-selector-failed',
-                message: 'Failed to register marker-pass handler for component selector; skipping range replacement for this component.',
-                context: { selector, componentKey },
-                error,
-            })
-            componentsWithInvalidSelectors.push(componentKey)
+    const logFailure = (selector: string, componentKey: string, error: unknown) => {
+        ctx.logger.log({
+            level: 'error',
+            code: 'marker-pass-selector-failed',
+            message: 'Failed to register marker-pass handler for component selector; skipping range replacement for this component.',
+            context: { selector, componentKey },
+            error,
+        })
+        componentsWithInvalidSelectors.push(componentKey)
+    }
+    const register = (included: ComponentHandlers[]) => {
+        elements = createRangeElements(
+            included.map(({ container }) => container),
+            included.map(({ visitor }) => visitor),
+        )
+        let session = rewriter.create().on(elements.handler.selector, elements.handler.handler)
+        for (const { handlers } of included) {
+            for (const { selector, handler } of handlers) {
+                session = session.on(selector, handler)
+            }
         }
+        return session
+    }
+    // A component whose handlers don't all register is dropped, so the shared handler only covers valid containers.
+    // `${container} *` is part of the shared handler's selector, so it is checked here too.
+    const isValid = ({ componentKey, container, handlers }: ComponentHandlers) => {
+        let probe = rewriter.create()
+        for (const selector of [container, combineSelectors(container, ' ', '*'), ...handlers.map((h) => h.selector)]) {
+            try {
+                probe = probe.on(selector, {})
+            } catch (error) {
+                logFailure(selector, componentKey, error)
+                return false
+            }
+        }
+        return true
+    }
+
+    let session: ReturnType<typeof register>
+    try {
+        session = register(components)
+    } catch {
+        const valid = components.filter(isValid)
+        if (!valid.length) {
+            return { markers, componentsWithInvalidSelectors }
+        }
+        session = register(valid)
     }
 
     await session.transform(response.clone()).text()
