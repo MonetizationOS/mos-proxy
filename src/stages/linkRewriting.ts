@@ -1,7 +1,8 @@
 import type { PipelineContext } from '../context'
 import { statusAllowsBody } from '../http'
-import compileOriginLinkRewriter from './originLinkRewriter'
+import compileOriginLinkRewriter, { createOriginLinkStreamRewriter, type OriginLinkStreamRewriter } from './originLinkRewriter'
 
+/** Rewrites origin links in headers and, streaming, in the body. */
 export default async function rewriteOriginResponse(ctx: PipelineContext, request: Request, response: Response): Promise<Response> {
     const { config, logger } = ctx
     const requestUrl = new URL(request.url)
@@ -35,10 +36,52 @@ export default async function rewriteOriginResponse(ctx: PipelineContext, reques
     headers.delete('Content-Length')
     headers.delete('Content-Encoding')
 
-    const body = await response.text()
-    if (!body) {
+    const reader = response.body.getReader()
+    const body = rewriteBody(reader, createOriginLinkStreamRewriter(requestUrl, originUrl))
+    // Read up to the first output so an empty body stays a null body.
+    const first = await body.next()
+    if (first.done) {
         return new Response(null, init)
     }
 
-    return new Response(originLinkRewriter(body), init)
+    const encoder = new TextEncoder()
+    let next: IteratorResult<string> | null = first
+    return new Response(
+        new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                const result = next ?? (await body.next())
+                next = null
+                if (result.done) {
+                    controller.close()
+                } else {
+                    controller.enqueue(encoder.encode(result.value))
+                }
+            },
+            async cancel(reason) {
+                // Cancel the origin first: return() waits for a pending read.
+                await reader.cancel(reason).catch(() => {})
+                await body.return(undefined)
+            },
+        }),
+        init,
+    )
+}
+
+async function* rewriteBody(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    rewriter: OriginLinkStreamRewriter,
+): AsyncGenerator<string, void, unknown> {
+    const decoder = new TextDecoder()
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            const output = rewriter.push(decoder.decode(value, { stream: true }))
+            if (output) yield output
+        }
+        const output = rewriter.push(decoder.decode()) + rewriter.end()
+        if (output) yield output
+    } finally {
+        await reader.cancel().catch(() => {})
+    }
 }
