@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ElementHandlers, HtmlRewriterAdapter, HtmlRewriterCapabilities, HtmlRewriterSession } from '../src/adapters'
 import { MOSProxyBuilder } from '../src/index'
+import { MOSProxy } from '../src/MOSProxy'
+import compileOriginLinkRewriter from '../src/stages/originLinkRewriter'
 import type { MOSConfigInput, SurfaceDecisionResponse } from '../src/types'
+import { controlledStream } from './fakes/ControlledStream'
+import { LolHtmlRewriter } from './fakes/LolHtmlRewriter'
 import { createMemoryLogger } from './fakes/MemoryLogger'
 import { MockFetcher } from './fakes/MockFetcher'
 import { PassthroughHtmlRewriter } from './fakes/PassthroughHtmlRewriter'
@@ -60,6 +64,38 @@ class TransformSequenceSession implements HtmlRewriterSession {
     transform(response: Response): Response {
         this.beforeTransform()
         return response
+    }
+}
+
+/** Real rewriting, except a session that targets `selector` throws from `transform`. */
+class ThrowingComponentRewriter implements HtmlRewriterAdapter {
+    readonly capabilities: HtmlRewriterCapabilities
+    private readonly inner = new LolHtmlRewriter()
+
+    constructor(
+        private readonly selector: string,
+        onEndTag = false,
+    ) {
+        this.capabilities = { onEndTag, nthChild: true }
+    }
+
+    create(): HtmlRewriterSession {
+        const inner = this.inner.create()
+        let targeted = false
+        const session: HtmlRewriterSession = {
+            on: (selector, handlers) => {
+                targeted ||= selector === this.selector
+                inner.on(selector, handlers)
+                return session
+            },
+            transform: (response) => {
+                if (targeted) {
+                    throw new Error('component transform failed')
+                }
+                return inner.transform(response)
+            },
+        }
+        return session
     }
 }
 
@@ -830,5 +866,267 @@ describe('MOSProxyBuilder validation', () => {
                 .withApiFetcher(MockFetcher(() => new Response(null)))
                 .build(),
         ).toThrow(/withHtmlRewriter/)
+    })
+})
+
+describe('MOSProxy streaming the origin page', () => {
+    const build = (originBody: ReadableStream<Uint8Array> | string, apiFetcher = MockFetcher(() => decisionsResponse())) =>
+        new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(MockFetcher(() => new Response(originBody, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })))
+            .withApiFetcher(apiFetcher)
+            .withHtmlRewriter(new LolHtmlRewriter())
+            .build()
+
+    it('requests surface decisions once the head is read, before the origin body ends', async () => {
+        const origin = controlledStream()
+        origin.push('<html><head><meta name="section" content="news"></head><body>', '<p>first</p>')
+        let decisionRequested!: () => void
+        const requested = new Promise<void>((resolve) => {
+            decisionRequested = resolve
+        })
+        const apiFetcher = MockFetcher(() => {
+            decisionRequested()
+            return decisionsResponse()
+        })
+
+        const handled = build(origin.stream, apiFetcher).handle(new Request('https://proxy.example.com/article'))
+        await requested
+        origin.push('<a href="https://origin.example.com/x">rest</a></body></html>')
+        origin.close()
+        const response = await handled
+
+        const body = JSON.parse(await apiFetcher.calls[0]!.request.text())
+        expect(body.resource.meta).toEqual({ section: 'news' })
+        expect(await response.text()).toBe(
+            '<html><head><meta name="section" content="news"></head><body><p>first</p><a href="https://proxy.example.com/x">rest</a></body></html>',
+        )
+    })
+
+    it.each([
+        [
+            'a full page',
+            '<!doctype html><html><head><title>t</title><meta property="og:url" content="https://origin.example.com/a"></head><body><a href="//origin.example.com/b">b</a></body></html>',
+        ],
+        ['a page without head or body tags', '<meta name="a" content="1"><p>https://origin.example.com/x café 😀</p>'],
+        [
+            'a page with </head> in a script',
+            '<head><script>var s = "</head>"</script></head><body><img src="https://origin.example.com/i.png"></body>',
+        ],
+    ])('returns the same bytes as a whole-body link rewrite for %s', async (_name, page) => {
+        const response = await build(page).handle(new Request('https://proxy.example.com/article'))
+
+        const expected = compileOriginLinkRewriter(new URL('https://proxy.example.com/article'), new URL(baseConfig.originUrl))(page)
+        expect(await response.text()).toBe(expected)
+    })
+
+    describe.each([
+        ['link rewriting only', (b: MOSProxyBuilder) => b.withoutSurfaceDecisions()],
+        ['no link rewriting or surface decisions', (b: MOSProxyBuilder) => b.withoutLinkRewriting().withoutSurfaceDecisions()],
+        ['the full pipeline', (b: MOSProxyBuilder) => b],
+    ])('with %s', (_name, configure) => {
+        it('cancels the origin when the client cancels while a read is waiting', async () => {
+            const origin = controlledStream()
+            origin.push('<html><head></head><body><p>first</p>')
+            const proxy = configure(
+                new MOSProxyBuilder()
+                    .withConfig(baseConfig)
+                    .withOriginFetcher(
+                        MockFetcher(() => new Response(origin.stream, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })),
+                    )
+                    .withApiFetcher(MockFetcher(() => decisionsResponse()))
+                    .withHtmlRewriter(new LolHtmlRewriter()),
+            ).build()
+            const reader = (await proxy.handle(new Request('https://proxy.example.com/article'))).body!.getReader()
+            await reader.read()
+            await new Promise((resolve) => setTimeout(resolve, 0))
+
+            await reader.cancel('client gone')
+
+            expect(origin.cancelled).toBe(true)
+        })
+    })
+
+    it('cancels the origin when the workflow replaces the page', async () => {
+        const origin = controlledStream()
+        origin.push('<html><head></head><body><p>first</p>')
+        const response = await build(
+            origin.stream,
+            MockFetcher(() => decisionsResponse({ surfaceBehavior: { http: { status: 402, body: 'Payment required' } } })),
+        ).handle(new Request('https://proxy.example.com/article'))
+
+        expect(await response.text()).toBe('Payment required')
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(origin.cancelled).toBe(true)
+    })
+
+    const cancelAfterFirstRead = async (response: Response) => {
+        const reader = response.body!.getReader()
+        await reader.read()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        await reader.cancel('client gone')
+    }
+
+    it('cancels the origin when the client cancels with no HTML rewriter', async () => {
+        const origin = controlledStream()
+        origin.push('<html><head></head><body><p>first</p>')
+        const proxy = new MOSProxy({
+            config: baseConfig,
+            originFetcher: MockFetcher(() => new Response(origin.stream, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })),
+            apiFetcher: MockFetcher(() => decisionsResponse()),
+            htmlRewriter: null,
+            clientMetadataProvider: null,
+            clientIpProvider: null,
+            identityProvider: null,
+            resourceProvider: null,
+            customEndpointsEnabled: false,
+            linkRewritingEnabled: true,
+            surfaceDecisionsEnabled: true,
+            htmlTransformationEnabled: true,
+        })
+
+        await cancelAfterFirstRead(await proxy.handle(new Request('https://proxy.example.com/article')))
+
+        expect(origin.cancelled).toBe(true)
+    })
+
+    it('serves the page when the error handler re-wraps the last safe body', async () => {
+        const page = '<html><head></head><body><article>first</article></body></html>'
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(MockFetcher(() => htmlResponse(page)))
+            .withApiFetcher(
+                MockFetcher(() =>
+                    decisionsResponse({
+                        componentsSkipped: false,
+                        componentBehaviors: {
+                            paywall: { metadata: { cssSelector: 'article' }, content: { append: [{ type: 'text', content: '!' }] } },
+                        },
+                    }),
+                ),
+            )
+            .withHtmlRewriter(new ThrowingComponentRewriter('article'))
+            .withoutLinkRewriting()
+            .withHtmlPipelineErrorHandler(({ lastSafeResponse }) => {
+                const headers = new Headers(lastSafeResponse.headers)
+                headers.set('X-Fallback', '1')
+                return new Response(lastSafeResponse.body, { status: 200, headers })
+            })
+            .build()
+
+        const response = await proxy.handle(new Request('https://proxy.example.com/article'))
+
+        expect(response.headers.get('X-Fallback')).toBe('1')
+        expect(await response.text()).toBe(page)
+    })
+
+    it('cancels the origin when the client cancels after persist replaces the body', async () => {
+        const origin = controlledStream()
+        origin.push('<html><head></head><body><p>first</p>')
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(MockFetcher(() => new Response(origin.stream, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })))
+            .withApiFetcher(MockFetcher(() => decisionsResponse()))
+            .withHtmlRewriter(new LolHtmlRewriter())
+            .withIdentityProvider({ persist: ({ response }) => new Response('<p>replaced</p>', response) })
+            .build()
+
+        await cancelAfterFirstRead(await proxy.handle(new Request('https://proxy.example.com/article')))
+
+        expect(origin.cancelled).toBe(true)
+    })
+
+    it('cancels the origin when the client cancels after a resource provider throws', async () => {
+        const origin = controlledStream()
+        origin.push('<html><head></head><body><p>first</p>')
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(MockFetcher(() => new Response(origin.stream, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })))
+            .withApiFetcher(MockFetcher(() => decisionsResponse()))
+            .withHtmlRewriter(new LolHtmlRewriter())
+            .withResourceProvider({
+                build: () => {
+                    throw new Error('resource provider failed')
+                },
+            })
+            .build()
+
+        await cancelAfterFirstRead(await proxy.handle(new Request('https://proxy.example.com/article')))
+
+        expect(origin.cancelled).toBe(true)
+    })
+
+    it('cancels the origin when the client cancels after the marker pass throws', async () => {
+        const origin = controlledStream()
+        origin.push('<html><head></head><body><article>first</article>')
+        const proxy = new MOSProxyBuilder()
+            .withConfig(baseConfig)
+            .withOriginFetcher(MockFetcher(() => new Response(origin.stream, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })))
+            .withApiFetcher(
+                MockFetcher(() =>
+                    decisionsResponse({
+                        componentsSkipped: false,
+                        componentBehaviors: {
+                            paywall: {
+                                metadata: { cssSelector: 'article' },
+                                content: { replaceRange: { fromMarker: 'div p', replaceWith: [{ type: 'text', content: '!' }] } },
+                            },
+                        },
+                    }),
+                ),
+            )
+            .withHtmlRewriter(new ThrowingComponentRewriter('article', true))
+            .build()
+
+        await cancelAfterFirstRead(await proxy.handle(new Request('https://proxy.example.com/article')))
+
+        expect(origin.cancelled).toBe(true)
+    })
+
+    describe.each([
+        ['no error handler', (b: MOSProxyBuilder) => b],
+        [
+            'an error handler that serves the last safe response',
+            (b: MOSProxyBuilder) => b.withHtmlPipelineErrorHandler(({ lastSafeResponse }) => lastSafeResponse),
+        ],
+        [
+            'an error handler that serves its own stream',
+            (b: MOSProxyBuilder) =>
+                b.withHtmlPipelineErrorHandler(() => {
+                    const own = controlledStream()
+                    own.push('<p>maintenance</p>')
+                    return new Response(own.stream)
+                }),
+        ],
+    ])('when the component transform throws, with %s', (_name, configure) => {
+        it('cancels the origin when the client cancels', async () => {
+            const origin = controlledStream()
+            origin.push('<html><head></head><body><article>first</article>')
+            const proxy = configure(
+                new MOSProxyBuilder()
+                    .withConfig(baseConfig)
+                    .withOriginFetcher(
+                        MockFetcher(() => new Response(origin.stream, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })),
+                    )
+                    .withApiFetcher(
+                        MockFetcher(() =>
+                            decisionsResponse({
+                                componentsSkipped: false,
+                                componentBehaviors: {
+                                    paywall: {
+                                        metadata: { cssSelector: 'article' },
+                                        content: { append: [{ type: 'text', content: '!' }] },
+                                    },
+                                },
+                            }),
+                        ),
+                    )
+                    .withHtmlRewriter(new ThrowingComponentRewriter('article')),
+            ).build()
+
+            await cancelAfterFirstRead(await proxy.handle(new Request('https://proxy.example.com/article')))
+
+            expect(origin.cancelled).toBe(true)
+        })
     })
 })

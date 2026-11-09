@@ -66,6 +66,11 @@ export default function handleSurfaceBehavior(
         body = null
     }
 
+    if (body !== response.body) {
+        // The origin page is replaced, so stop reading it
+        response.body?.cancel().catch(() => {})
+    }
+
     return [
         new Response(body, {
             status,

@@ -3,6 +3,8 @@ import { normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
 import type { MOSProxyLogger } from '../../src/logger'
 import rewriteOriginResponse from '../../src/stages/linkRewriting'
+import compileOriginLinkRewriter from '../../src/stages/originLinkRewriter'
+import { controlledStream } from '../fakes/ControlledStream'
 
 const silentLogger: MOSProxyLogger = { log() {} }
 const ctx: PipelineContext = {
@@ -94,5 +96,109 @@ describe('rewriteOriginResponse', () => {
 
         expect(result.headers.get('Content-Length')).toBe('0')
         expect(result.headers.get('Content-Encoding')).toBe('gzip')
+    })
+
+    describe('streaming', () => {
+        const page = [
+            '\uFEFF<html><head><link rel="canonical" href="https://origin.example.com/a">',
+            '<script src="//origin.example.com/s.js"></script></head><body>',
+            '<a href="http://origin.example.com">x</a> https://origin.example.com.evil/ //origin.example.comx',
+            ' café 😀 https://origin.example.com/😀 ',
+            '<a href="https://origin.example.com/b">y</a></body></html>',
+        ].join('')
+        const bytes = new TextEncoder().encode(page)
+        // What the old whole-body path produced: `response.text()` (drops the BOM), then one rewrite.
+        const expected = compileOriginLinkRewriter(
+            new URL('https://proxy.example.com/'),
+            new URL('https://origin.example.com'),
+        )(new TextDecoder().decode(bytes))
+
+        const rewriteChunks = async (chunks: Uint8Array[]) => {
+            const source = controlledStream()
+            source.push(...chunks)
+            source.close()
+            const result = await rewriteOriginResponse(
+                ctx,
+                proxyRequest(),
+                new Response(source.stream, { headers: { 'Content-Type': 'text/html' } }),
+            )
+            return await result.text()
+        }
+
+        it('matches the whole-body rewrite for every split point', async () => {
+            for (let i = 0; i <= bytes.length; i++) {
+                expect(await rewriteChunks([bytes.slice(0, i), bytes.slice(i)])).toBe(expected)
+            }
+        })
+
+        it('matches the whole-body rewrite when fed byte by byte', async () => {
+            expect(await rewriteChunks(Array.from(bytes, (byte) => Uint8Array.of(byte)))).toBe(expected)
+        })
+
+        it('returns before the origin body ends', async () => {
+            const source = controlledStream()
+            source.push(`<head>${'<link href="https://origin.example.com/x">'.repeat(10)}</head>`)
+            const result = await rewriteOriginResponse(
+                ctx,
+                proxyRequest(),
+                new Response(source.stream, { headers: { 'Content-Type': 'text/html' } }),
+            )
+
+            const reader = result.body!.getReader()
+            const { value } = await reader.read()
+            expect(new TextDecoder().decode(value)).toContain('<head><link href="https://proxy.example.com/x">')
+            await reader.cancel()
+            expect(source.cancelled).toBe(true)
+        })
+
+        it('cancels the origin while a read is waiting on it', async () => {
+            const source = controlledStream()
+            source.push('<head></head>')
+            const result = await rewriteOriginResponse(
+                ctx,
+                proxyRequest(),
+                new Response(source.stream, { headers: { 'Content-Type': 'text/html' } }),
+            )
+
+            const reader = result.body!.getReader()
+            await reader.read()
+            const pending = reader.read()
+            // Let the pull reach the stalled origin read
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            await reader.cancel()
+
+            expect(source.cancelled).toBe(true)
+            expect((await pending).done).toBe(true)
+        })
+
+        it('holds back only text that could still become an origin link', async () => {
+            const source = controlledStream()
+            source.push('<head></head><body>')
+            const result = await rewriteOriginResponse(
+                ctx,
+                proxyRequest(),
+                new Response(source.stream, { headers: { 'Content-Type': 'text/html' } }),
+            )
+            const reader = result.body!.getReader()
+            const decoder = new TextDecoder()
+
+            expect(decoder.decode((await reader.read()).value)).toBe('<head></head><body>')
+            source.push('<a href="https://origin.exam')
+            expect(decoder.decode((await reader.read()).value)).toBe('<a href="')
+            source.push('ple.com/x">')
+            source.close()
+            expect(decoder.decode((await reader.read()).value)).toBe('https://proxy.example.com/x">')
+        })
+
+        it('returns a null body for an empty origin body', async () => {
+            const result = await rewriteChunks([])
+            expect(result).toBe('')
+            const empty = await rewriteOriginResponse(
+                ctx,
+                proxyRequest(),
+                new Response(new Uint8Array(0), { headers: { 'Content-Type': 'text/html' } }),
+            )
+            expect(empty.body).toBeNull()
+        })
     })
 })

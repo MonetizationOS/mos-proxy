@@ -3,6 +3,7 @@ import { normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
 import type { MOSProxyLogger } from '../../src/logger'
 import { parsePageMetadata } from '../../src/stages/pageMetadata'
+import { controlledStream } from '../fakes/ControlledStream'
 import { LolHtmlRewriter } from '../fakes/LolHtmlRewriter'
 
 const html = (body: string) => new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -93,5 +94,89 @@ describe('parsePageMetadata', () => {
         )
 
         expect(metadata).toEqual({ x: 'y' })
+    })
+
+    describe('stops at <body>', () => {
+        // The source is left open: a parse that waits for the whole page never settles.
+        const openPage = (...chunks: string[]) => {
+            const source = controlledStream()
+            source.push(...chunks)
+            return { source, response: new Response(source.stream, { headers: { 'Content-Type': 'text/html' } }) }
+        }
+
+        it('at <body> without waiting for the rest of the page', async () => {
+            const { source, response } = openPage('<html><head><meta name="a" content="1"></head><body>')
+
+            const metadata = await parsePageMetadata(ctx, response, new LolHtmlRewriter())
+
+            expect(metadata).toEqual({ a: '1' })
+            expect(source.cancelled).toBe(true)
+        })
+
+        it('reads <meta> between </head> and <body>, whatever the rewriter supports', async () => {
+            class NoEndTagRewriter extends LolHtmlRewriter {
+                override readonly capabilities = { onEndTag: false, nthChild: true }
+            }
+            const page = '<head><meta name="a" content="1"></head><meta name="b" content="2"><body>'
+
+            const withEndTags = openPage(page)
+            const withoutEndTags = openPage(page)
+
+            expect(await parsePageMetadata(ctx, withEndTags.response, new LolHtmlRewriter())).toEqual({ a: '1', b: '2' })
+            expect(await parsePageMetadata(ctx, withoutEndTags.response, new NoEndTagRewriter())).toEqual({ a: '1', b: '2' })
+            expect(withEndTags.source.cancelled && withoutEndTags.source.cancelled).toBe(true)
+        })
+
+        it('when <body> is split across chunks', async () => {
+            const { source, response } = openPage('<head><meta name="a" content="1"></head><bo', 'dy>')
+
+            const metadata = await parsePageMetadata(ctx, response, new LolHtmlRewriter())
+
+            expect(metadata).toEqual({ a: '1' })
+            expect(source.cancelled).toBe(true)
+        })
+
+        it('after the byte cap when the page has no <body>', async () => {
+            const { source, response } = openPage(
+                '<meta name="a" content="1">',
+                '<meta name="b" content="2">',
+                '<meta name="c" content="3">',
+            )
+
+            const metadata = await parsePageMetadata(ctx, response, new LolHtmlRewriter(), 40)
+
+            expect(metadata).toEqual({ a: '1', b: '2' })
+            expect(source.cancelled).toBe(true)
+        })
+
+        it('reads to the end of a short page with no <body>', async () => {
+            const metadata = await parsePageMetadata(
+                ctx,
+                html('<meta name="a" content="1"><p>text</p><meta name="b" content="2">'),
+                new LolHtmlRewriter(),
+            )
+
+            expect(metadata).toEqual({ a: '1', b: '2' })
+        })
+
+        it('ignores </head> and <body> inside comments and scripts', async () => {
+            const { response } = openPage(
+                '<head><!-- </head><body> --><script>var s = "</head><body>"</script><meta name="a" content="1"></head><body>',
+            )
+
+            const metadata = await parsePageMetadata(ctx, response, new LolHtmlRewriter())
+
+            expect(metadata).toEqual({ a: '1' })
+        })
+
+        it('does not read meta tags in the body', async () => {
+            const metadata = await parsePageMetadata(
+                ctx,
+                html('<head><meta name="a" content="1"></head><body><meta name="b" content="2"></body>'),
+                new LolHtmlRewriter(),
+            )
+
+            expect(metadata).toEqual({ a: '1' })
+        })
     })
 })

@@ -38,29 +38,37 @@ export default async function getSurfaceDecisions(
         return [response, null]
     }
 
-    const [metadataStream, passThroughStream] = response.body?.tee() ?? [null, null]
+    // No tee without a rewriter: an unread branch would keep the origin open after the client cancels
+    const [metadataStream, passThroughStream] = (rewriter && response.body?.tee()) || [null, null]
     const pageMetadata = metadataStream && rewriter ? await parsePageMetadata(ctx, new Response(metadataStream, response), rewriter) : {}
     let modifiedResponse = passThroughStream ? new Response(passThroughStream, response) : response
 
-    const clientMetadata = clientMetadataProvider?.build(request) ?? {}
+    let result: Awaited<ReturnType<typeof fetchSurfaceDecisions>>
+    try {
+        const clientMetadata = clientMetadataProvider?.build(request) ?? {}
 
-    const resource = { id: new URL(request.url).pathname, meta: pageMetadata, ...resourceProvider?.build(request) }
+        const resource = { id: new URL(request.url).pathname, meta: pageMetadata, ...resourceProvider?.build(request) }
 
-    const result = await fetchSurfaceDecisions(
-        ctx,
-        {
-            identity,
-            url: request.url,
-            clientMetadata,
-            resource,
-            userAgent: request.headers.get('User-Agent') ?? undefined,
-            clientIP: normalizeClientIP(clientIpProvider?.(request)),
-            referer: request.headers.get('Referer') ?? undefined,
-            cookies: selectSurfaceDecisionCookies(request.headers.get('Cookie'), response, config.surfaceDecisionsCookiePatterns),
-            originStatus: response.status,
-        },
-        apiFetcher,
-    )
+        result = await fetchSurfaceDecisions(
+            ctx,
+            {
+                identity,
+                url: request.url,
+                clientMetadata,
+                resource,
+                userAgent: request.headers.get('User-Agent') ?? undefined,
+                clientIP: normalizeClientIP(clientIpProvider?.(request)),
+                referer: request.headers.get('Referer') ?? undefined,
+                cookies: selectSurfaceDecisionCookies(request.headers.get('Cookie'), response, config.surfaceDecisionsCookiePatterns),
+                originStatus: response.status,
+            },
+            apiFetcher,
+        )
+    } catch (error) {
+        // The caller can't reach the pass-through branch, and unread it would keep the origin open
+        passThroughStream?.cancel().catch(() => {})
+        throw error
+    }
 
     if (!result.ok) {
         logger.log({
@@ -80,6 +88,7 @@ export default async function getSurfaceDecisions(
     const surfaceDecisions = result.data
 
     const persist = identityProvider?.persist ?? defaultPersistIdentity
+    const beforePersist = modifiedResponse.body
     try {
         modifiedResponse = await persist({
             resolved: identity,
@@ -96,6 +105,11 @@ export default async function getSurfaceDecisions(
             message: 'Identity provider persist threw; keeping pre-persist response.',
             error,
         })
+    }
+
+    if (modifiedResponse.body !== beforePersist) {
+        // persist replaced the body, so nothing reads the page any more
+        beforePersist?.cancel().catch(() => {})
     }
 
     return [modifiedResponse, surfaceDecisions]

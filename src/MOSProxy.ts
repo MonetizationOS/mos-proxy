@@ -138,7 +138,19 @@ export class MOSProxy {
         }
 
         let stage: MOSProxyHtmlPipelineStage = 'origin-response'
-        let failOpenResponse = cloneResponseForFallback(originResponse, logger, stage)
+        let failOpen = cloneResponseForFallback(originResponse, logger, stage)
+        // The response the current stage reads, the fallback clone's sibling
+        let staged = originResponse
+        // An unread clone keeps the origin open after the client cancels, so drop each one once it can't be served
+        const keepFailOpen = (response: Response) => {
+            discardFallback(failOpen)
+            staged = response
+            failOpen = cloneResponseForFallback(response, logger, stage)
+        }
+        const done = (response: Response) => {
+            discardFallback(failOpen)
+            return response
+        }
 
         try {
             // Stage 2: rewrite origin links (optional)
@@ -146,15 +158,15 @@ export class MOSProxy {
             if (this.opts.linkRewritingEnabled) {
                 stage = 'link-rewriting'
                 rewrittenResponse = await rewriteOriginResponse(ctx, request, originResponse)
-                failOpenResponse = cloneResponseForFallback(rewrittenResponse, logger, stage)
+                keepFailOpen(rewrittenResponse)
             }
 
             // Stage 3: surface decisions (optional)
             if (!this.opts.surfaceDecisionsEnabled) {
-                return rewrittenResponse
+                return done(rewrittenResponse)
             }
             if (shouldIgnorePath(ctx, request) || isRedirectResponse(rewrittenResponse)) {
-                return rewrittenResponse
+                return done(rewrittenResponse)
             }
 
             if (!apiFetcher) {
@@ -174,24 +186,24 @@ export class MOSProxy {
                 resourceProvider,
             )
             if (!surfaceDecisions) {
-                return modifiedResponse
+                return done(modifiedResponse)
             }
-            failOpenResponse = cloneResponseForFallback(modifiedResponse, logger, stage)
+            keepFailOpen(modifiedResponse)
 
             // Stage 4: surface behavior (HTTP-level)
             stage = 'surface-behavior'
             const [surfaceDecisionResponse, returnImmediately] = handleSurfaceBehavior(modifiedResponse, surfaceDecisions)
             if (returnImmediately) {
-                return surfaceDecisionResponse
+                return done(surfaceDecisionResponse)
             }
-            failOpenResponse = cloneResponseForFallback(surfaceDecisionResponse, logger, stage)
+            keepFailOpen(surfaceDecisionResponse)
 
             // Stage 5: surface components (HTML-level) — requires an HTML rewriter
             if (!htmlRewriter) {
-                return surfaceDecisionResponse
+                return done(surfaceDecisionResponse)
             }
             stage = 'surface-components'
-            return await handleSurfaceComponents(ctx, surfaceDecisionResponse, surfaceDecisions, htmlRewriter)
+            return done(await handleSurfaceComponents(ctx, surfaceDecisionResponse, surfaceDecisions, htmlRewriter))
         } catch (error) {
             logger.log({
                 level: 'error',
@@ -201,8 +213,13 @@ export class MOSProxy {
                 error,
             })
 
+            // The failed stage may have left its branch unread, which would keep the origin open
+            if (failOpen.cloned) {
+                staged.body?.cancel().catch(() => {})
+            }
+
             if (!onHtmlPipelineError) {
-                return failOpenResponse
+                return failOpen.response
             }
 
             try {
@@ -210,7 +227,7 @@ export class MOSProxy {
                     error,
                     stage,
                     request,
-                    lastSafeResponse: failOpenResponse,
+                    lastSafeResponse: failOpen.response,
                 })
                 if (!(handlerResponse instanceof Response)) {
                     logger.log({
@@ -219,7 +236,11 @@ export class MOSProxy {
                         message: 'onHtmlPipelineError did not return a Response; falling back to the last safe response.',
                         context: { stage },
                     })
-                    return failOpenResponse
+                    return failOpen.response
+                }
+                // Unless the handler serves the fallback's body, even wrapped in a new Response
+                if (handlerResponse.body !== failOpen.response.body) {
+                    discardFallback(failOpen)
                 }
                 return handlerResponse
             } catch (handlerError) {
@@ -230,15 +251,17 @@ export class MOSProxy {
                     context: { stage },
                     error: handlerError,
                 })
-                return failOpenResponse
+                return failOpen.response
             }
         }
     }
 }
 
-const cloneResponseForFallback = (response: Response, logger: MOSProxyLogger, stage: MOSProxyHtmlPipelineStage): Response => {
+type FailOpen = { response: Response; cloned: boolean }
+
+const cloneResponseForFallback = (response: Response, logger: MOSProxyLogger, stage: MOSProxyHtmlPipelineStage): FailOpen => {
     try {
-        return response.clone()
+        return { response: response.clone(), cloned: true }
     } catch (error) {
         logger.log({
             level: 'warn',
@@ -247,6 +270,13 @@ const cloneResponseForFallback = (response: Response, logger: MOSProxyLogger, st
             context: { stage },
             error,
         })
-        return response
+        return { response, cloned: false }
+    }
+}
+
+/** Not awaited: a clone's cancel waits for its sibling, which may still be streaming. */
+const discardFallback = ({ response, cloned }: FailOpen) => {
+    if (cloned) {
+        response.body?.cancel().catch(() => {})
     }
 }

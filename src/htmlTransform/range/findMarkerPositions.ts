@@ -167,6 +167,13 @@ export const findMarkerPositions = async (
         session = register(valid)
     }
 
-    await session.transform(response.clone()).text()
+    const copy = response.clone()
+    try {
+        await session.transform(copy).text()
+    } catch (error) {
+        // An unread copy would keep the origin open; a no-op if the rewriter took it
+        copy.body?.cancel().catch(() => {})
+        throw error
+    }
     return { markers, componentsWithInvalidSelectors }
 }

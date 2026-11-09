@@ -71,18 +71,29 @@ class LolHtmlSession implements HtmlRewriterSession {
 
         const rewriter = this.rewriter
         const chunks = this.chunks
+        const body = response.body
+        const flush = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+            for (const chunk of chunks.splice(0)) {
+                controller.enqueue(chunk)
+            }
+        }
+        // Streams input chunk by chunk, like the platform rewriters.
         const stream = new ReadableStream<Uint8Array>({
             async start(controller) {
+                const reader = body.getReader()
                 try {
-                    const body = await response.text()
-                    await rewriter.write(new TextEncoder().encode(body))
-                    await rewriter.end()
-                    for (const chunk of chunks) {
-                        controller.enqueue(chunk)
+                    for (;;) {
+                        const { done, value } = await reader.read()
+                        if (done) break
+                        await rewriter.write(value)
+                        flush(controller)
                     }
+                    await rewriter.end()
+                    flush(controller)
                     controller.close()
                 } catch (error) {
                     controller.error(error)
+                    await reader.cancel(error).catch(() => {})
                 } finally {
                     rewriter.free()
                 }
