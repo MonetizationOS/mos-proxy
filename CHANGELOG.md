@@ -1,5 +1,11 @@
 # @monetizationos/proxy
 
+## 1.11.0
+
+### Minor Changes
+
+- [#49](https://github.com/MonetizationOS/mos-proxy/pull/49) [`abec149`](https://github.com/MonetizationOS/mos-proxy/commit/abec149113daf0c596d8488b48ba8bb37d3af0f3) Thanks [@benney](https://github.com/benney)! - The surface decision request goes out once the page head has been read, instead of after the whole origin page. Page metadata is read up to `<body>`, or about the first 1 MB when the page has none, so `<meta>` tags in the body are no longer sent as resource metadata. This also applies to the exported `parsePageMetadata`. Link rewriting now streams the body instead of buffering it; output is unchanged. Cancelling the response, or a workflow body replacing the page, now cancels the origin.
+
 ## 1.10.0
 
 ### Minor Changes
