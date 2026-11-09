@@ -38,22 +38,22 @@ export type RangeCut = {
     cut: (page: Uint8Array<ArrayBuffer>, rewriter: HtmlRewriterAdapter, headers: Headers) => Promise<Uint8Array<ArrayBuffer> | null>
 }
 
-/** Each boundary's kind, one byte in the page */
+/** Each boundary's kind, written as one digit */
 const Kind = {
-    containerStart: 'o',
-    containerEnd: 'c',
+    containerStart: 0,
+    containerEnd: 1,
     /** The cut starts, after the replacement */
-    cutStart: 'r',
+    cutStart: 2,
     /** Before the end marker, where the cut ends */
-    cutEnd: 'e',
+    cutEnd: 3,
     /** Before a start marker that isn't a direct child, so its cut is spliced: puts back the end tags of what holds the marker */
-    restoreEndTags: 'a',
+    restoreEndTags: 4,
     /** Before and after an inner container in the cut, which the cut skips */
-    skipStart: 'k',
-    skipEnd: 'K',
+    skipStart: 5,
+    skipEnd: 6,
 } as const
 type Kind = (typeof Kind)[keyof typeof Kind]
-const KINDS = new Set<string>(Object.values(Kind))
+const KIND_COUNT = Object.keys(Kind).length
 
 type ContainerState = Cut & {
     id: number
@@ -404,9 +404,16 @@ const boundaries = (page: Uint8Array, prefix: Uint8Array, written: number) => {
         while ((page[i] ?? 0) >= 48 && (page[i] ?? 0) <= 57) {
             id = id * 10 + (page[i++] as number) - 48
         }
-        const kind = String.fromCharCode(page[i + 1] ?? 0) as Kind
-        // `-{kind}-->`
-        if (i === digits || page[i] !== 45 || !KINDS.has(kind) || page[i + 2] !== 45 || page[i + 3] !== 45 || page[i + 4] !== 62) {
+        const kind = ((page[i + 1] ?? 0) - 48) as Kind
+        // After the id comes `-`, the kind's digit, then `-->`
+        if (
+            i === digits ||
+            page[i] !== 45 ||
+            !(kind >= 0 && kind < KIND_COUNT) ||
+            page[i + 2] !== 45 ||
+            page[i + 3] !== 45 ||
+            page[i + 4] !== 62
+        ) {
             return null
         }
         return { id, kind, start, end: i + 5 }
