@@ -56,12 +56,7 @@ export interface RewriterElement {
     replace(content: string, options?: ContentOptions): void
     remove(): void
     removeAndKeepContent(): void
-    onEndTag?(callback: (endTag?: RewriterEndTag) => void | Promise<void>): void
-}
-
-/** The end tag that closed an element. Its name differs from the element's when another element's end tag closed it. */
-export interface RewriterEndTag {
-    readonly name: string
+    onEndTag?(callback: () => void | Promise<void>): void
 }
 
 export interface RewriterText {

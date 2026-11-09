@@ -4,12 +4,8 @@ import type { SubSurfaceBehaviorApi } from '../types'
 import { renderElement } from './elements'
 import type { ComponentRange } from './findMarkerPositions'
 import type { RangeElements, RangeVisitor } from './rangeElements'
+import { type Cut, createContainerStack, endCut, firstPhase, startCut } from './rangeTracker'
 import { isVoidElement } from './voidElements'
-
-type ReplacementState = {
-    // `IN_START`: a start marker nested in the first one doesn't start the range again
-    operation: 'SCANNING' | 'IN_START' | 'REMOVING' | 'REPLACED'
-}
 
 export type ReplacementHandler = { selector: string; handler: ElementHandlers }
 
@@ -20,10 +16,9 @@ export type ReplacementHandlers = {
 }
 
 /**
- * Requires a prior pass by `findMarkerPositions` to populate `ranges`. Depends on
- * `element.onEndTag` to detect element boundaries — on adapters without `capabilities.onEndTag`,
- * the caller should skip this step. The `visitor` runs from a `createRangeElements` handler,
- * which also provides `onEnd`.
+ * Requires a prior pass by `findMarkerPositions` to populate `ranges`. Depends on `element.onEndTag` to detect element
+ * boundaries, so the caller skips this step on adapters without `capabilities.onEndTag`. The `visitor` runs from a
+ * `createRangeElements` handler, which also provides `onEnd`.
  */
 export const buildReplacementHandlers = (
     ctx: HtmlStageContext,
@@ -33,7 +28,8 @@ export const buildReplacementHandlers = (
 ): ReplacementHandlers | null => {
     const { logger } = ctx
     const modification = subSurface.content?.replaceRange
-    if (!modification || !ranges) {
+    const selector = subSurface.metadata.cssSelector
+    if (!modification || !ranges || !selector) {
         return null
     }
 
@@ -42,131 +38,76 @@ export const buildReplacementHandlers = (
             level: 'warn',
             code: 'replacement-markers-identical',
             message: 'Range replacement skipped: fromMarker and toMarker are identical.',
-            context: { marker: modification.fromMarker, selector: subSurface.metadata.cssSelector },
+            context: { marker: modification.fromMarker, selector },
         })
         return null
     }
 
-    let elementCounter = 0
+    // A removed container still opens a range, so the ranges line up with the marker pass, but cuts nothing
+    type Frame = Cut & { range: ComponentRange | undefined }
+    const stack = createContainerStack<Frame>(onEnd)
     let rangeIndex = -1
-    // Open containers, innermost last; each element is in the range of the innermost one. A removed container has no state.
-    const open: { state: ReplacementState | null; range: ComponentRange | undefined }[] = []
-    const getCurrentState = () => {
-        const frame = open.at(-1)
-        if (!frame) {
-            logger.log({
-                level: 'warn',
-                code: 'replacement-state-missing',
-                message: 'Range replacement handler invoked with no active replacement state; skipping.',
-                context: { selector: subSurface.metadata.cssSelector },
-            })
-            return
-        }
-        return frame.state ?? undefined
-    }
-
-    const onChildElement = (element: RewriterElement) => {
-        elementCounter++
-        if (element.removed) {
-            return
-        }
-
-        const state = getCurrentState()
-        const range = open.at(-1)?.range
-        const marker = range?.markers[elementCounter]
-
-        if (state?.operation === 'SCANNING') {
-            if (marker?.startMarker) {
-                for (const after of (modification.replaceWith ?? []).slice().reverse()) {
-                    const [content, options] = renderElement(ctx, after)
-                    element.after(content, options)
-                }
-                state.operation = 'IN_START'
-                if (
-                    !onEnd(element, () => {
-                        state.operation = 'REMOVING'
-                    })
-                ) {
-                    state.operation = 'REMOVING'
-                }
-            }
-            return
-        }
-
-        if (state?.operation === 'REMOVING') {
-            if (marker?.endMarker) {
-                state.operation = 'REPLACED'
-                return
-            }
-
-            if (marker?.endTag !== elementCounter && marker?.nextEndMarker && marker?.endTag && marker.endTag >= marker.nextEndMarker) {
-                return
-            }
-
-            // A nested container, or an element holding one, is kept for the nested container's own range
-            if (range && marker?.endTag && holdsIsland(range.islands, elementCounter, marker.endTag)) {
-                return
-            }
-
-            element.remove()
-            return
+    const insert = (place: (content: string, options?: { html?: boolean }) => void) => {
+        for (const item of (modification.replaceWith ?? []).slice().reverse()) {
+            place(...renderElement(ctx, item))
         }
     }
+
+    const visitor = stack.visitor((element, number, frame) => {
+        const { range } = frame
+        const marker = range?.markers[number]
+        if (frame.phase === 'scanning') {
+            if (marker?.startMarker && startCut(frame, element, onEnd)) {
+                insert((content, options) => element.after(content, options))
+            }
+            return
+        }
+        // A marker another component removed still marks the cut
+        if (frame.phase !== 'open' || (marker?.endMarker && endCut(frame)) || element.removed) {
+            return
+        }
+        // An end marker, an inner container (cut by its own range) or an element holding one is kept
+        if (range && marker?.endTag && holdsAny(range.kept, number, marker.endTag)) {
+            return
+        }
+        element.remove()
+    })
 
     const parentHandler: ElementHandlers = {
         element(element: RewriterElement) {
-            rangeIndex++
+            const range = ranges[++rangeIndex]
             // No content to cut
             if (isVoidElement(element)) {
                 return
             }
-            // A removed container still opens a range, so the ranges line up with the marker pass
-            const state: ReplacementState | null = element.removed ? null : { operation: modification.fromMarker ? 'SCANNING' : 'REMOVING' }
-
-            if (state?.operation === 'REMOVING') {
-                for (const prepend of (modification.replaceWith ?? []).slice().reverse()) {
-                    const [content, options] = renderElement(ctx, prepend)
-                    element.prepend(content, options)
-                }
+            const frame: Frame = { phase: element.removed ? 'closed' : firstPhase(modification.fromMarker), range }
+            if (frame.phase === 'open') {
+                insert((content, options) => element.prepend(content, options))
             }
-            const index = open.length
-            // A self-closing foreign container (`<path/>`) has no end tag or content to cut. A container's end also
-            // closes containers left open in it.
-            if (
-                onEnd(element, () => {
-                    open.length = index
-                })
-            ) {
-                open.push({ state, range: ranges[rangeIndex] })
-            }
+            stack.enter(element, frame)
         },
 
         text: (text: RewriterText) => {
-            const state = getCurrentState()
-            if (state?.operation === 'REMOVING') {
+            if (stack.top()?.phase === 'open') {
                 text.remove()
             }
         },
     }
 
-    const selector = subSurface.metadata.cssSelector
-    if (!selector) {
-        return null
-    }
-    return { container: { selector, handler: parentHandler }, visitor: { open: () => open.length > 0, child: onChildElement } }
+    return { container: { selector, handler: parentHandler }, visitor }
 }
 
-/** Whether element `from` is a nested container or holds one: one starts from it to `to`, its last element. */
-const holdsIsland = (islands: number[], from: number, to: number) => {
+/** Whether a sorted list has a number from `from` to `to`: element `from`, whose last element is `to`, is or holds it. */
+const holdsAny = (sorted: number[], from: number, to: number) => {
     let low = 0
-    let high = islands.length
+    let high = sorted.length
     while (low < high) {
         const mid = (low + high) >> 1
-        if ((islands[mid] as number) < from) {
+        if ((sorted[mid] as number) < from) {
             low = mid + 1
         } else {
             high = mid
         }
     }
-    return low < islands.length && (islands[low] as number) <= to
+    return low < sorted.length && (sorted[low] as number) <= to
 }

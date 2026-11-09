@@ -2,7 +2,8 @@ import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../a
 import type { HtmlStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
 import { createRangeElements, type RangeElements, type RangeVisitor } from './rangeElements'
-import { combineSelectors } from './wrappedRange'
+import { createContainerStack } from './rangeTracker'
+import { combineSelectors } from './selectors'
 
 export type SurfaceMarkers = {
     componentsWithInvalidSelectors: string[]
@@ -10,22 +11,19 @@ export type SurfaceMarkers = {
 }
 
 export type ComponentRange = {
-    /** By element number; an element in a nested container is in that container's range instead */
+    /** By element number; an element in an inner container is in that container's range instead */
     markers: Marker[]
-    /** The element number before the container's first element */
-    start: number
-    /** Element numbers of the containers nested in this one, in order. The range cuts around them. */
-    islands: number[]
+    /** Element numbers of its end markers and inner containers, in order. The cut keeps them and what holds them. */
+    kept: number[]
 }
 
 export type Marker = {
     endTag: number | null
     startMarker: boolean
     endMarker: boolean
-    nextEndMarker: number | null
 }
 
-type Handler = { selector: string; componentKey: string; handler: ElementHandlers }
+type Handler = { selector: string; handler: ElementHandlers }
 type ComponentHandlers = { componentKey: string; container: string; visitor: RangeVisitor; handlers: Handler[] }
 
 /**
@@ -38,15 +36,6 @@ export const findMarkerPositions = async (
     surfaceDecisions: SurfaceDecisionResponse,
     rewriter: HtmlRewriterAdapter,
 ): Promise<SurfaceMarkers> => {
-    const logInvalidState = (location: string, componentKey: string) => {
-        ctx.logger.log({
-            level: 'warn',
-            code: 'marker-pass-invalid-state',
-            message: 'Marker handler invoked with no active range; skipping.',
-            context: { location, componentKey },
-        })
-    }
-
     const markers: SurfaceMarkers['markers'] = Object.fromEntries(
         Object.entries(surfaceDecisions.componentBehaviors).map(([key]) => [key, []]),
     )
@@ -59,111 +48,68 @@ export const findMarkerPositions = async (
                 return []
             }
             const { toMarker, fromMarker } = modification
-            let elementCounter = 0
-            // Open containers, innermost last. Each element is in the range of the innermost one.
-            const open: ComponentRange[] = []
+            const container = componentBehavior.metadata.cssSelector
+            const stack = createContainerStack<ComponentRange>((element, callback) => elements?.onEnd(element, callback) ?? false)
             // The current element and the range it is in
             let current: { range: ComponentRange; marker: Marker } | null = null
+            // The marker handlers run after the shared handler has visited the element
+            const onMarker = (mark: (current: { range: ComponentRange; marker: Marker }) => void) => () => {
+                if (current) {
+                    mark(current)
+                }
+            }
 
-            const entries: (Handler | null)[] = [
+            const handlers: Handler[] = [
                 {
-                    selector: `${componentBehavior.metadata.cssSelector}`,
-                    componentKey,
+                    selector: container,
                     handler: {
                         element: (element: RewriterElement) => {
-                            const range: ComponentRange = { markers: [], start: elementCounter, islands: [] }
+                            const range: ComponentRange = { markers: [], kept: [] }
                             markers[componentKey]?.push(range)
-                            const index = open.length
-                            // With no end tag there is nothing to cut in it, so a container it is in cuts it as any element.
-                            // Its end also closes containers left open in it.
-                            if (
-                                elements?.onEnd(element, () => {
-                                    open.length = index
-                                })
-                            ) {
-                                // Nested in another container, which cuts around it
-                                open.at(-1)?.islands.push(elementCounter)
-                                open.push(range)
+                            const outer = stack.top()
+                            if (stack.enter(element, range)) {
+                                // An inner container, which the outer one cuts around
+                                outer?.kept.push(stack.count())
                             }
                         },
                     },
                 },
-                toMarker
-                    ? {
-                          selector: combineSelectors(componentBehavior.metadata.cssSelector, ' ', toMarker),
-                          componentKey,
-                          handler: {
-                              element() {
-                                  if (!current) {
-                                      logInvalidState('to-marker', componentKey)
-                                      return
-                                  }
-                                  const { range, marker } = current
-                                  marker.endMarker = true
-                                  for (let i = elementCounter; i > range.start; i--) {
-                                      // Missing where the element is in a nested container's range
-                                      const m = range.markers[i]
-                                      if (m?.nextEndMarker) {
-                                          break
-                                      }
-                                      if (m) {
-                                          m.nextEndMarker = elementCounter
-                                      }
-                                  }
-                              },
-                          },
-                      }
-                    : null,
-                fromMarker
-                    ? {
-                          selector: combineSelectors(componentBehavior.metadata.cssSelector, ' ', fromMarker),
-                          componentKey,
-                          handler: {
-                              element() {
-                                  if (!current) {
-                                      logInvalidState('from-marker', componentKey)
-                                      return
-                                  }
-                                  current.marker.startMarker = true
-                              },
-                          },
-                      }
-                    : null,
             ]
-            const visitor: RangeVisitor = {
-                open: () => open.length > 0,
-                child(element: RewriterElement) {
-                    const currentRange = open.at(-1)
-                    if (!currentRange) {
-                        logInvalidState('child-element', componentKey)
-                        return
-                    }
-                    ++elementCounter
-                    const marker: Marker = {
-                        endMarker: false,
-                        startMarker: false,
-                        endTag: null,
-                        nextEndMarker: null,
-                    }
-                    currentRange.markers[elementCounter] = marker
-                    current = { range: currentRange, marker }
-                    if (
-                        !elements?.onEnd(element, () => {
-                            marker.endTag = elementCounter
-                        })
-                    ) {
-                        marker.endTag = elementCounter
-                    }
-                },
+            if (toMarker) {
+                handlers.push({
+                    selector: combineSelectors(container, ' ', toMarker),
+                    handler: {
+                        element: onMarker(({ range, marker }) => {
+                            marker.endMarker = true
+                            range.kept.push(stack.count())
+                        }),
+                    },
+                })
             }
-            return [
-                {
-                    componentKey,
-                    container: componentBehavior.metadata.cssSelector,
-                    visitor,
-                    handlers: entries.filter((e): e is Handler => !!e),
-                },
-            ]
+            if (fromMarker) {
+                handlers.push({
+                    selector: combineSelectors(container, ' ', fromMarker),
+                    handler: {
+                        element: onMarker(({ marker }) => {
+                            marker.startMarker = true
+                        }),
+                    },
+                })
+            }
+            const visitor = stack.visitor((element, number, range) => {
+                const marker: Marker = { endMarker: false, startMarker: false, endTag: null }
+                range.markers[number] = marker
+                current = { range, marker }
+                // Unnamed, as bundlers that keep function names would name it on every element
+                if (
+                    !elements?.onEnd(element, () => {
+                        marker.endTag = stack.count()
+                    })
+                ) {
+                    marker.endTag = number
+                }
+            })
+            return [{ componentKey, container, visitor, handlers }]
         },
     )
 

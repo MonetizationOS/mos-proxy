@@ -15,7 +15,6 @@ export type {
     HtmlRewriterCapabilities,
     HtmlRewriterSession,
     RewriterElement,
-    RewriterEndTag,
     RewriterText,
 } from './HtmlRewriterAdapter'
 export type { Identity, IdentityProvider, PersistIdentityArgs, ResolveIdentityArgs } from './IdentityProvider'

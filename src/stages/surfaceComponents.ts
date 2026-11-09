@@ -4,8 +4,8 @@ import type { SurfaceDecisionResponse } from '../types'
 import { buildReplacementHandlers, type ReplacementHandlers } from './buildReplacementHandlers'
 import { ContentElementHandler } from './ContentElementHandler'
 import { findMarkerPositions } from './findMarkerPositions'
+import { planRangeCut, type RangeCut } from './rangeCut'
 import { createRangeElements, type RangeElements } from './rangeElements'
-import { planRangeWrapper, type RangeWrapper } from './wrappedRange'
 
 export default async function handleSurfaceComponents(
     ctx: ComponentStageContext,
@@ -17,63 +17,54 @@ export default async function handleSurfaceComponents(
         return response
     }
 
-    const wrapper = rewriter.capabilities.onEndTag && response.body ? planRangeWrapper(ctx, surfaceDecisions) : null
-    if (!wrapper) {
+    const rangeCut = rewriter.capabilities.onEndTag && response.body ? planRangeCut(ctx, surfaceDecisions) : null
+    if (!rangeCut) {
         return applyComponents(ctx, response, surfaceDecisions, rewriter, null)
     }
 
-    // Buffered, because whether the wrapper can cut the page is only known once pass 1 has read all of it
+    // Buffered, because whether the fast path can cut the page is only known once pass 1 has read all of it
     const page = await response.arrayBuffer()
     const headers = new Headers(response.headers)
     headers.delete('content-length')
     const init = { status: response.status, statusText: response.statusText, headers }
-    const wrapped = await applyComponents(ctx, new Response(page, init), surfaceDecisions, rewriter, wrapper)
-    let wrappedPage: Uint8Array<ArrayBuffer> | null = new Uint8Array(await wrapped.arrayBuffer())
-    if (!wrapper.unsupported() && wrapper.nested() > 0) {
-        wrappedPage = await wrapper.splice(wrappedPage, rewriter, headers)
-    }
-    if (wrapper.unsupported() || !wrappedPage) {
+    const marked = await applyComponents(ctx, new Response(page, init), surfaceDecisions, rewriter, rangeCut)
+    const markedPage = new Uint8Array(await marked.arrayBuffer())
+    const cut = rangeCut.fallbackReason() ? null : await rangeCut.cut(markedPage, rewriter, headers)
+    if (!cut) {
         return applyComponents(ctx, new Response(page, init), surfaceDecisions, rewriter, null)
     }
-    if (wrapper.wrapped() === 0) {
-        return new Response(wrappedPage, init)
-    }
-    let unwrap = rewriter.create()
-    for (const { selector, handler } of wrapper.unwrap) {
-        unwrap = unwrap.on(selector, handler)
-    }
-    return unwrap.transform(new Response(wrappedPage, init))
+    return new Response(cut, init)
 }
 
-/** With no `wrapper`, ranges are cut element by element. */
+/** With no `rangeCut`, ranges are cut element by element. */
 export async function applyComponents(
     ctx: ComponentStageContext,
     response: Response,
     surfaceDecisions: SurfaceDecisionResponse,
     rewriter: HtmlRewriterAdapter,
-    wrapper: RangeWrapper | null,
+    rangeCut: RangeCut | null,
 ): Promise<Response> {
     const { config, logger } = ctx
     const supportsRangeReplacement = rewriter.capabilities.onEndTag
     const { markers, componentsWithInvalidSelectors } =
-        supportsRangeReplacement && !wrapper
+        supportsRangeReplacement && !rangeCut
             ? await findMarkerPositions(ctx, response, surfaceDecisions, rewriter)
             : { markers: {}, componentsWithInvalidSelectors: [] }
 
     let doRewrite = false
     let session = rewriter.create()
-    const registerWrapper = (handlers: RangeWrapper['handlers']) => {
+    const registerRangeCut = (handlers: RangeCut['handlers']) => {
         for (const { selector, handler } of handlers) {
             try {
                 session = session.on(selector, handler)
                 doRewrite = true
             } catch {
-                wrapper?.fail()
+                rangeCut?.fallBack('handler-rejected')
             }
         }
     }
-    // Ahead of every other component, so what they insert lands outside the wrapper
-    registerWrapper(wrapper?.handlers ?? [])
+    // Ahead of every other component, so what they prepend or append to a container lands outside its boundaries
+    registerRangeCut(rangeCut?.handlers ?? [])
 
     let elements: RangeElements | null = null
     const onEnd: RangeElements['onEnd'] = (element, callback) => elements?.onEnd(element, callback) ?? false
@@ -94,8 +85,8 @@ export async function applyComponents(
         }
 
         let range: ReplacementHandlers | null = null
-        const cutByWrapper = wrapper?.componentKeys.includes(componentKey)
-        if (supportsRangeReplacement && !cutByWrapper && !componentsWithInvalidSelectors.includes(componentKey)) {
+        const cutFast = rangeCut?.componentKeys.includes(componentKey)
+        if (supportsRangeReplacement && !cutFast && !componentsWithInvalidSelectors.includes(componentKey)) {
             range = buildReplacementHandlers(ctx, componentBehavior, markers[componentKey], onEnd)
         } else if (!supportsRangeReplacement && componentBehavior.content.replaceRange) {
             logger.log({
