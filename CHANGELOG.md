@@ -1,5 +1,19 @@
 # @monetizationos/proxy
 
+## 1.10.0
+
+### Minor Changes
+
+- [#48](https://github.com/MonetizationOS/mos-proxy/pull/48) [`a31d0d7`](https://github.com/MonetizationOS/mos-proxy/commit/a31d0d792be4df8b9542de766cf177b137ea581d) Thanks [@benney](https://github.com/benney)! - A range's container nested in another of its containers is now cut by its own range. The outer container's cut goes around it and ignores the markers inside it, and keeps what holds it. Previously only the outermost container was cut. A nested container deeper than a direct child of the outer container's cut is cut element by element.
+
+  More pages are cut in one pass instead of element by element: a nested start marker on a page with several range components or nested containers, a container left without its end tag when no cut needs its end, a self-closing container, and an element that is both a container and a marker.
+
+### Patch Changes
+
+- [#48](https://github.com/MonetizationOS/mos-proxy/pull/48) [`a31d0d7`](https://github.com/MonetizationOS/mos-proxy/commit/a31d0d792be4df8b9542de766cf177b137ea581d) Thanks [@benney](https://github.com/benney)! - Fix range replacement cut element by element when the containers or markers of several range components share elements. Only the last end tag callback registered on an element runs, so one range's callback dropped another's, and every later container of that range was cut from the wrong markers. Range handlers now share one end tag callback per element.
+
+  A start or end marker removed by a component registered ahead of the range now marks the cut element by element too, as it already did in one pass.
+
 ## 1.9.0
 
 ### Minor Changes
