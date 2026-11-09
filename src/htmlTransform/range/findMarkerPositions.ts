@@ -1,9 +1,9 @@
-import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
-import type { HtmlStageContext } from '../context'
-import type { SurfaceDecisionResponse } from '../types'
+import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../../adapters/HtmlRewriterAdapter'
+import type { HtmlStageContext } from '../../context'
+import type { SurfaceDecisionResponse } from '../../types'
+import { combineSelectors } from '../selectors'
 import { createRangeElements, type RangeElements, type RangeVisitor } from './rangeElements'
 import { createContainerStack } from './rangeTracker'
-import { combineSelectors } from './selectors'
 
 export type SurfaceMarkers = {
     componentsWithInvalidSelectors: string[]

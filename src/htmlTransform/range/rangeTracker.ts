@@ -1,4 +1,4 @@
-import type { RewriterElement } from '../adapters/HtmlRewriterAdapter'
+import type { RewriterElement } from '../../adapters/HtmlRewriterAdapter'
 import type { EndTags, RangeVisitor } from './rangeElements'
 
 /**

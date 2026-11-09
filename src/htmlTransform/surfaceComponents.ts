@@ -1,11 +1,11 @@
 import type { HtmlRewriterAdapter } from '../adapters/HtmlRewriterAdapter'
 import type { ComponentStageContext } from '../context'
 import type { SurfaceDecisionResponse } from '../types'
-import { buildReplacementHandlers, type ReplacementHandlers } from './buildReplacementHandlers'
 import { ContentElementHandler } from './ContentElementHandler'
-import { findMarkerPositions } from './findMarkerPositions'
-import { planRangeCut, type RangeCut } from './rangeCut'
-import { createRangeElements, type RangeElements } from './rangeElements'
+import { buildReplacementHandlers, type ReplacementHandlers } from './range/buildReplacementHandlers'
+import { findMarkerPositions } from './range/findMarkerPositions'
+import { planRangeCut, type RangeCut } from './range/rangeCut'
+import { createRangeElements, type RangeElements } from './range/rangeElements'
 
 export default async function handleSurfaceComponents(
     ctx: ComponentStageContext,

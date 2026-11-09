@@ -1,6 +1,6 @@
-import type { ElementHandlers, RewriterElement } from '../adapters/HtmlRewriterAdapter'
-import { combineSelectors } from './selectors'
-import { isVoidElement } from './voidElements'
+import type { ElementHandlers, RewriterElement } from '../../adapters/HtmlRewriterAdapter'
+import { combineSelectors } from '../selectors'
+import { isVoidElement } from '../voidElements'
 
 export type RangeVisitor = {
     /** A container is open, so the element is in it */

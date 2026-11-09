@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeMOSConfig } from '../../src/config'
 import type { PipelineContext } from '../../src/context'
-import handleSurfaceComponents from '../../src/stages/surfaceComponents'
+import handleSurfaceComponents from '../../src/htmlTransform/surfaceComponents'
 import type { SurfaceDecisionResponse, WebContentSurfaceBehavior } from '../../src/types'
 import { LolHtmlRewriter } from '../fakes/LolHtmlRewriter'
 

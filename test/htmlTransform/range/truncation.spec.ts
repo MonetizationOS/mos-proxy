@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeMOSConfig } from '../../src/config'
-import type { PipelineContext } from '../../src/context'
-import handleSurfaceComponents, { applyComponents } from '../../src/stages/surfaceComponents'
-import type { SurfaceDecisionResponse, WebContentSurfaceBehavior } from '../../src/types'
-import { LolHtmlRewriter } from '../fakes/LolHtmlRewriter'
+import { normalizeMOSConfig } from '../../../src/config'
+import type { PipelineContext } from '../../../src/context'
+import handleSurfaceComponents, { applyComponents } from '../../../src/htmlTransform/surfaceComponents'
+import type { SurfaceDecisionResponse, WebContentSurfaceBehavior } from '../../../src/types'
+import { LolHtmlRewriter } from '../../fakes/LolHtmlRewriter'
 
 const ctx: PipelineContext = {
     config: normalizeMOSConfig({

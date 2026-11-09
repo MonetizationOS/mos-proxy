@@ -1,11 +1,11 @@
-import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../adapters/HtmlRewriterAdapter'
-import type { HtmlStageContext } from '../context'
-import type { SurfaceDecisionResponse } from '../types'
-import { renderElement } from './elements'
+import type { ElementHandlers, HtmlRewriterAdapter, RewriterElement } from '../../adapters/HtmlRewriterAdapter'
+import type { HtmlStageContext } from '../../context'
+import type { SurfaceDecisionResponse } from '../../types'
+import { renderElement } from '../elements'
+import { combineSelectors, isCompound, splitSelectorList } from '../selectors'
+import { isVoidElement } from '../voidElements'
 import { createEndTags } from './rangeElements'
 import { type Cut, createContainerStack, endCut, firstPhase, startCut } from './rangeTracker'
-import { combineSelectors, isCompound, splitSelectorList } from './selectors'
-import { isVoidElement } from './voidElements'
 
 type Handler = { selector: string; handler: ElementHandlers }
 

@@ -1,11 +1,11 @@
-import type { ElementHandlers, RewriterElement, RewriterText } from '../adapters/HtmlRewriterAdapter'
-import type { HtmlStageContext } from '../context'
-import type { SubSurfaceBehaviorApi } from '../types'
-import { renderElement } from './elements'
+import type { ElementHandlers, RewriterElement, RewriterText } from '../../adapters/HtmlRewriterAdapter'
+import type { HtmlStageContext } from '../../context'
+import type { SubSurfaceBehaviorApi } from '../../types'
+import { renderElement } from '../elements'
+import { isVoidElement } from '../voidElements'
 import type { ComponentRange } from './findMarkerPositions'
 import type { RangeElements, RangeVisitor } from './rangeElements'
 import { type Cut, createContainerStack, endCut, firstPhase, startCut } from './rangeTracker'
-import { isVoidElement } from './voidElements'
 
 export type ReplacementHandler = { selector: string; handler: ElementHandlers }
 

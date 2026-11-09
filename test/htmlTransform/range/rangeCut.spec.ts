@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeMOSConfig } from '../../src/config'
-import type { PipelineContext } from '../../src/context'
-import { planRangeCut } from '../../src/stages/rangeCut'
-import { combineSelectors, splitSelectorList } from '../../src/stages/selectors'
-import handleSurfaceComponents, { applyComponents } from '../../src/stages/surfaceComponents'
-import type { SurfaceDecisionResponse, WebElement } from '../../src/types'
-import { EndTagSpyRewriter } from '../fakes/EndTagSpyRewriter'
+import { normalizeMOSConfig } from '../../../src/config'
+import type { PipelineContext } from '../../../src/context'
+import { planRangeCut } from '../../../src/htmlTransform/range/rangeCut'
+import { combineSelectors, splitSelectorList } from '../../../src/htmlTransform/selectors'
+import handleSurfaceComponents, { applyComponents } from '../../../src/htmlTransform/surfaceComponents'
+import type { SurfaceDecisionResponse, WebElement } from '../../../src/types'
+import { EndTagSpyRewriter } from '../../fakes/EndTagSpyRewriter'
 
 const ctx: PipelineContext = {
     config: normalizeMOSConfig({

@@ -1,7 +1,7 @@
 import type { HtmlRewriterAdapter } from './adapters/HtmlRewriterAdapter'
+import handleSurfaceComponents from './htmlTransform/surfaceComponents'
 import type { MOSProxyLogger } from './logger'
 import { parsePageMetadata as parsePageMetadataStage } from './stages/pageMetadata'
-import handleSurfaceComponents from './stages/surfaceComponents'
 import type { PageMetadata, SurfaceDecisionResponse } from './types'
 
 /**
