@@ -1242,12 +1242,14 @@ describe('MOSProxy range requests', () => {
         expect(originFetcher.calls[0]?.request.headers.get('Range')).toBe('bytes=0-2')
     })
 
-    it('does not send several ranges to the origin', async () => {
-        const originFetcher = MockFetcher(() => new Response('PDF', { headers: { 'Content-Type': 'application/pdf' } }))
+    it('does not send several ranges to the origin, and transforms the whole page', async () => {
+        const originFetcher = MockFetcher(() => htmlResponse(page, { headers: { 'Accept-Ranges': 'bytes' } }))
 
         const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9, 20-29'))
 
         expect(response.status).toBe(200)
+        expect(await response.text()).toBe('<a href="https://proxy.example.com/other">x</a>')
+        expect(response.headers.has('Accept-Ranges')).toBe(false)
         expect(originFetcher.calls.length).toBe(1)
         expect(originFetcher.calls[0]?.request.headers.has('Range')).toBe(false)
         expect(originFetcher.calls[0]?.request.headers.has('If-Range')).toBe(false)
