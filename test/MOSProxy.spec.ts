@@ -1157,13 +1157,6 @@ describe('MOSProxy range requests', () => {
     const page = '<a href="https://origin.example.com/other">x</a>'
     const partialHtml = () =>
         htmlResponse(page.slice(0, 10), { status: 206, headers: { 'Content-Range': `bytes 0-9/${page.length}`, 'Accept-Ranges': 'bytes' } })
-    const parts = (partType: string | null) => {
-        const headers = `${partType ? `Content-Type: ${partType}\r\n` : ''}Content-Range: bytes 0-9/100\r\n\r\n`
-        return `preamble\r\n--b\r\n${headers}0123456789\r\n--b\r\n${headers}0123456789\r\n--b--\r\n`
-    }
-    const multipart = (body: BodyInit) =>
-        new Response(body, { status: 206, headers: { 'Content-Type': 'multipart/byteranges; boundary="b"' } })
-
     const buildProxy = (originFetcher: MockFetcher, configure = (builder: MOSProxyBuilder) => builder) =>
         configure(
             new MOSProxyBuilder()
@@ -1176,25 +1169,12 @@ describe('MOSProxy range requests', () => {
     const ranged = (range: string, init: RequestInit = {}) =>
         new Request('https://proxy.example.com/article', { ...init, headers: { Range: range, 'If-Range': '"v1"' } })
 
-    it.each([
-        ['part of a page', partialHtml],
-        ['several parts of a page', () => multipart(parts('text/html; charset=utf-8'))],
-        ['several parts it cannot read the type of', () => multipart('--b\r\nContent-Range: bytes 0-9/100')],
-        [
-            'several parts of a page with a folded Content-Type',
-            () => multipart('--b\r\nContent-Type:\r\n text/html\r\nContent-Range: bytes 0-9/100\r\n\r\n0123456789\r\n--b--\r\n'),
-        ],
-        ['several parts whose body errors', () => multipart(new ReadableStream({ pull: (c) => c.error(new Error('origin reset')) }))],
-        [
-            'several parts of a page after a preamble line that starts with the boundary',
-            () => multipart(`--bogus\r\n\r\n${parts('text/html')}`),
-        ],
-    ])('fetches the whole page again when the origin returns %s', async (_, partial) => {
+    it('fetches the whole page again when the origin returns part of it', async () => {
         const originFetcher = MockFetcher((req) =>
-            req.headers.has('Range') ? partial() : htmlResponse(page, { headers: { 'Accept-Ranges': 'bytes' } }),
+            req.headers.has('Range') ? partialHtml() : htmlResponse(page, { headers: { 'Accept-Ranges': 'bytes' } }),
         )
 
-        const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9,20-'))
+        const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9'))
 
         expect(response.status).toBe(200)
         expect(await response.text()).toBe('<a href="https://proxy.example.com/other">x</a>')
@@ -1262,28 +1242,15 @@ describe('MOSProxy range requests', () => {
         expect(originFetcher.calls[0]?.request.headers.get('Range')).toBe('bytes=0-2')
     })
 
-    it.each([
-        ['a non-HTML type', 'application/pdf'],
-        ['no type', null],
-    ])('passes several parts with %s through', async (_, partType) => {
-        const originFetcher = MockFetcher(() => multipart(parts(partType)))
+    it('does not send several ranges to the origin', async () => {
+        const originFetcher = MockFetcher(() => new Response('PDF', { headers: { 'Content-Type': 'application/pdf' } }))
 
-        const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9,20-29'))
+        const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9, 20-29'))
 
-        expect(response.status).toBe(206)
-        expect(await response.text()).toBe(parts(partType))
+        expect(response.status).toBe(200)
         expect(originFetcher.calls.length).toBe(1)
-    })
-
-    it('reads a part after a delimiter line padded with whitespace and ending in LF', async () => {
-        const body = '--b \t\nContent-Type: application/pdf\nContent-Range: bytes 0-9/100\n\n0123456789\n--b--\n'
-        const originFetcher = MockFetcher(() => multipart(body))
-
-        const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9,20-29'))
-
-        expect(response.status).toBe(206)
-        expect(await response.text()).toBe(body)
-        expect(originFetcher.calls.length).toBe(1)
+        expect(originFetcher.calls[0]?.request.headers.has('Range')).toBe(false)
+        expect(originFetcher.calls[0]?.request.headers.has('If-Range')).toBe(false)
     })
 
     it('removes Content-Range when the origin returns part of a page without a range', async () => {
@@ -1354,42 +1321,16 @@ describe('MOSProxy range requests', () => {
         expect(originFetcher.calls.length).toBe(1)
     })
 
-    it('reads part headers split across chunks, and streams the rest', async () => {
-        const origin = controlledStream()
-        const body = parts('application/pdf')
-        const originFetcher = MockFetcher(() => multipart(origin.stream))
-
-        // The first part's headers end at 78
-        origin.push(body.slice(0, 15), body.slice(15, 40), body.slice(40, 90))
-        const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9,20-29'))
-        expect(response.status).toBe(206)
-
-        origin.push(body.slice(90))
-        origin.close()
-        expect(await response.text()).toBe(body)
-        expect(originFetcher.calls.length).toBe(1)
-    })
-
-    it('cancels the origin when the client cancels several parts it passed through', async () => {
-        const origin = controlledStream()
-        const originFetcher = MockFetcher(() => multipart(origin.stream))
-
-        origin.push(parts('application/pdf').slice(0, 80))
-        const response = await buildProxy(originFetcher).handle(ranged('bytes=0-9,20-29'))
-        await response.body?.cancel()
-
-        expect(origin.cancelled).toBe(true)
-    })
-
-    it('passes part of a page through when HTML transformation is disabled', async () => {
+    it('passes ranges through when HTML transformation is disabled', async () => {
         const originFetcher = MockFetcher(partialHtml)
 
         const response = await buildProxy(originFetcher, (builder) => builder.withoutHtmlTransformation().withoutSurfaceDecisions()).handle(
-            ranged('bytes=0-9'),
+            ranged('bytes=0-9,20-29'),
         )
 
         expect(response.status).toBe(206)
         expect(originFetcher.calls.length).toBe(1)
+        expect(originFetcher.calls[0]?.request.headers.get('Range')).toBe('bytes=0-9,20-29')
     })
 
     it('drops a configured range when fetching the whole page again', async () => {

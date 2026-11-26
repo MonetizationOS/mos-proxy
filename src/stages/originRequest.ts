@@ -2,11 +2,14 @@ import type { Fetcher } from '../adapters/Fetcher'
 import type { PipelineContext } from '../context'
 import getTargetUrl from './getTargetUrl'
 
+/** Which Range headers are passed to the origin. */
+export type OriginRanges = 'any' | 'single' | 'none'
+
 export default function performOriginRequest(
     ctx: PipelineContext,
     request: Request,
     originFetcher: Fetcher,
-    { ignoreRange = false } = {},
+    ranges: OriginRanges = 'any',
 ): Promise<Response> {
     const viewerUrl = new URL(request.url)
     const targetUrl = getTargetUrl(viewerUrl, ctx.config.originUrl)
@@ -22,7 +25,9 @@ export default function performOriginRequest(
     }
 
     // Ranges are only defined for GET. After originRequestHeaders, so config can't add one back.
-    if (ignoreRange || (request.method !== 'GET' && request.method !== 'HEAD')) {
+    const isGet = request.method === 'GET' || request.method === 'HEAD'
+    const severalRanges = originRequest.headers.get('Range')?.includes(',') ?? false
+    if (!isGet || ranges === 'none' || (ranges === 'single' && severalRanges)) {
         originRequest.headers.delete('Range')
         originRequest.headers.delete('If-Range')
     }
