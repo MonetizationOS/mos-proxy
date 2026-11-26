@@ -8,8 +8,10 @@ import type { ResourceProvider } from './adapters/ResourceProvider'
 import { ConfigResolution } from './configResolution'
 import type { PipelineContext } from './context'
 import handleSurfaceComponents from './htmlTransform/surfaceComponents'
+import { isHtmlContentType } from './http'
 import { consoleLogger, type MOSProxyLogger } from './logger'
 import customEndpointRequest from './stages/customEndpoint'
+import fetchWholeHtml from './stages/fetchWholeHtml'
 import isRedirectResponse from './stages/isRedirectResponse'
 import rewriteOriginResponse from './stages/linkRewriting'
 import { handleMosAuthenticatedApiRoutes } from './stages/mosAuthenticatedApi'
@@ -129,11 +131,14 @@ export class MOSProxy {
         }
 
         // Stage 1c: origin fetch
-        const originResponse = await performOriginRequest(ctx, request, originFetcher)
+        let originResponse = await performOriginRequest(ctx, request, originFetcher)
 
-        // Auto-skip HTML pipeline for non-HTML content, or when HTML transformation is disabled entirely
-        const isHtml = originResponse.headers.get('Content-Type')?.startsWith('text/html') ?? false
-        if (!isHtml || !this.opts.htmlTransformationEnabled) {
+        // Auto-skip HTML pipeline when HTML transformation is disabled entirely, or for non-HTML content
+        if (!this.opts.htmlTransformationEnabled) {
+            return originResponse
+        }
+        originResponse = await fetchWholeHtml(ctx, request, originFetcher, originResponse)
+        if (!isHtmlContentType(originResponse.headers.get('Content-Type'))) {
             return originResponse
         }
 

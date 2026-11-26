@@ -45,7 +45,7 @@ Notes:
 Pipeline order:
 
 1. Custom endpoint routing (`/mos-endpoints/*` to MOS API)
-2. Origin fetch
+2. Origin fetch (a range on an HTML page is ignored and the whole page fetched, in `fetchWholeHtml`)
 3. Link rewriting
 4. Surface decisions (includes `<meta>` extraction via `parsePageMetadata`, only when surface decisions and an HTML rewriter adapter are both configured)
 5. Surface behavior HTTP mutations
