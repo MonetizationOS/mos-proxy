@@ -130,8 +130,9 @@ export class MOSProxy {
             return authenticatedApiResult
         }
 
-        // Stage 1c: origin fetch
-        let originResponse = await performOriginRequest(ctx, request, originFetcher)
+        // Stage 1c: origin fetch. Several ranges of a page would come back as parts the pipeline can't read.
+        const ranges = this.opts.htmlTransformationEnabled ? 'single' : 'any'
+        let originResponse = await performOriginRequest(ctx, request, originFetcher, ranges)
 
         // Auto-skip HTML pipeline when HTML transformation is disabled entirely, or for non-HTML content
         if (!this.opts.htmlTransformationEnabled) {
