@@ -1,5 +1,13 @@
 # @monetizationos/proxy
 
+## 1.11.1
+
+### Patch Changes
+
+- [#52](https://github.com/MonetizationOS/mos-proxy/pull/52) [`94ee67d`](https://github.com/MonetizationOS/mos-proxy/commit/94ee67dc42a0d55d5bc21fea7a561613f39d57d6) Thanks [@benney](https://github.com/benney)! - Range requests for HTML pages now get the whole page. When the origin answers a range request with part of an HTML page, the proxy fetches the page again without `Range` or `If-Range` and runs it through the HTML pipeline as usual. A request for several ranges is sent to the origin without them, so the whole resource is returned, and single ranges of other content are passed through as before. `Range` and `If-Range` are no longer sent to the origin for requests other than GET and HEAD, `Accept-Ranges` and `Content-Range` are removed from HTML responses, and an HTML `Content-Type` is matched whatever its case.
+
+  Thanks to [kta1kri](https://github.com/kta1kri) for the report.
+
 ## 1.11.0
 
 ### Minor Changes
